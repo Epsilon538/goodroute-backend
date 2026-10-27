@@ -7,20 +7,23 @@ import unicodedata
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from faker import Faker
 
 from modelos import ESTADO_POR_ASIGNAR
 
+# Semilla de técnicos y clientes: fija, para que sus IDs no cambien entre resets.
+# Las OTs y el historial usan una semilla distinta en cada reset (ver `FuenteDatos.reiniciar`).
 SEMILLA = 42
 # Namespace fijo: uuid4 ignora random.seed y cambiaría los IDs en cada reinicio.
 NAMESPACE = uuid.UUID("6f1c2b8e-3d4a-4e5f-9a7b-1c2d3e4f5a6b")
 
-# Las horas de la API son UTC. Las OTs parten entre 8:00 y 20:00 hora de Chile
-# (la última termina antes de las 21:00); se convierten sumando el desfase.
-DESFASE_UTC_CHILE = 3
-HORA_PRIMERA_OT_UTC = 8 + DESFASE_UTC_CHILE
-HORA_ULTIMA_OT_UTC = 20 + DESFASE_UTC_CHILE
+# La API entrega las horas en UTC; la jornada se define en hora de Chile y se convierte con la
+# zona horaria, porque el desfase cambia entre horario de verano (UTC-3) y de invierno (UTC-4).
+ZONA_CHILE = ZoneInfo("America/Santiago")
+HORA_PRIMERA_OT = 8
+HORA_ULTIMA_OT = 19
 
 # (región, OTs por día)
 ORDENES_POR_REGION = [
@@ -37,14 +40,19 @@ DIRECCIONES = json.loads(
 fake = Faker("es_CL")
 
 
-def fijar_semillas() -> None:
-    random.seed(SEMILLA)
-    Faker.seed(SEMILLA)
+def fijar_semillas(semilla: int = SEMILLA) -> None:
+    random.seed(semilla)
+    Faker.seed(semilla)
 
 
-def azar_de(*partes) -> random.Random:
+def azar_de(semilla: int, *partes) -> random.Random:
     """Generador propio por entidad, para no alterar la secuencia global de `random`."""
-    return random.Random("-".join(str(p) for p in (SEMILLA, *partes)))
+    return random.Random("-".join(str(p) for p in (semilla, *partes)))
+
+
+def programada_utc(fecha: date, hora: int, minuto: int = 0) -> datetime:
+    """Hora de Chile de ese día convertida a UTC."""
+    return datetime(fecha.year, fecha.month, fecha.day, hora, minuto, tzinfo=ZONA_CHILE).astimezone(timezone.utc)
 
 
 def iso_utc(momento: datetime) -> str:
@@ -77,8 +85,11 @@ def nombre_usuario(nombre: str, apellidos: str) -> str:
 
 
 def nueva_orden(numero: int, tipo: str, direccion: dict, region: str,
-                fecha: date, hora: int, cliente: dict) -> dict:
-    """OT recién ingresada: sin técnico, sin problemas reportados y con facturación pendiente."""
+                programada: datetime, cliente: dict, azar: random.Random) -> dict:
+    """OT recién ingresada: sin técnico, sin problemas reportados y con facturación pendiente.
+
+    `programada` es un instante UTC; entre 8:00 y 19:00 de Chile la fecha UTC y la chilena coinciden.
+    """
     ahora = ahora_utc()
     return {
         "id": f"OT-{numero:04d}",
@@ -86,7 +97,7 @@ def nueva_orden(numero: int, tipo: str, direccion: dict, region: str,
         "tipo": tipo,
         "estado": ESTADO_POR_ASIGNAR,
         "clienteId": cliente["id"],
-        "contratoId": f"CT-{azar_de('ot', numero).randint(1000, 9999)}",
+        "contratoId": f"CT-{azar.randint(1000, 9999)}",
         "tecnicoId": None,
         "direccionFactura": cliente["direccionFactura"],
         "direccionInstalacion": direccion["direccion"],
@@ -95,8 +106,8 @@ def nueva_orden(numero: int, tipo: str, direccion: dict, region: str,
         "contactoNombre": cliente["contactoNombre"],
         "contactoTelefono": cliente["contactoTelefono"],
         "contactoEmail": cliente["contactoEmail"],
-        "fechaProgramada": fecha.isoformat(),
-        "horaProgramada": f"{hora:02d}:00",
+        "fechaProgramada": programada.date().isoformat(),
+        "horaProgramada": programada.strftime("%H:%M"),
         "problemaInicioReportado": False,
         "motivoNoInicio": None,
         "facturacion": {

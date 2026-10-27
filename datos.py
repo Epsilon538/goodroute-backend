@@ -3,6 +3,7 @@
 El formato sigue el modelo de datos del backoffice v3.0: campos en camelCase,
 fechas en UTC (ISO 8601 con sufijo Z) y disponibilidad como patrón semanal.
 Las OTs de hoy en adelante nacen `porAsignar`; las anteriores son historial (`historial.py`).
+Técnicos y clientes son siempre los mismos; las OTs cambian en cada reset (semilla distinta).
 """
 
 import random
@@ -12,15 +13,17 @@ from typing import Optional
 
 from generadores import (
     DIRECCIONES,
-    HORA_PRIMERA_OT_UTC,
-    HORA_ULTIMA_OT_UTC,
+    HORA_PRIMERA_OT,
+    HORA_ULTIMA_OT,
     NAMESPACE,
     ORDENES_POR_REGION,
+    SEMILLA,
     azar_de,
     fake,
     fijar_semillas,
     nombre_usuario,
     nueva_orden,
+    programada_utc,
     rut_aleatorio,
     telefono_aleatorio,
 )
@@ -49,7 +52,7 @@ def _generar_tecnicos() -> list[dict]:
             nombre = fake.first_name()
             apellidos = f"{fake.last_name()} {fake.last_name()}"
             zona = random.choice(comunas)
-            azar = azar_de("tecnico", numero)
+            azar = azar_de(SEMILLA, "tecnico", numero)
             usuario = nombre_usuario(nombre, apellidos)
             tecnicos.append({
                 "id": str(uuid.uuid5(NAMESPACE, f"tecnico-{numero}")),
@@ -73,7 +76,7 @@ def _generar_tecnicos() -> list[dict]:
 def _generar_clientes() -> list[dict]:
     clientes = []
     for numero in range(1, CANTIDAD_CLIENTES + 1):
-        azar = azar_de("cliente", numero)
+        azar = azar_de(SEMILLA, "cliente", numero)
         nombre, apellido = fake.first_name(), fake.last_name()
         region = azar.choice(list(DIRECCIONES.values()))
         clientes.append({
@@ -88,18 +91,20 @@ def _generar_clientes() -> list[dict]:
     return clientes
 
 
-def _generar_ordenes(clientes: list[dict]) -> list[dict]:
+def _generar_ordenes(clientes: list[dict], semilla: int) -> list[dict]:
     ordenes = []
     hoy = date.today()
     for offset in range(DIAS_ORDENES):
         fecha = hoy + timedelta(days=offset)
         for region, cantidad in ORDENES_POR_REGION:
             for direccion in random.sample(DIRECCIONES[region], cantidad):
-                hora = random.randint(HORA_PRIMERA_OT_UTC, HORA_ULTIMA_OT_UTC)
+                hora = random.randint(HORA_PRIMERA_OT, HORA_ULTIMA_OT)
                 tipo = random.choice(TIPOS_OT)
                 numero = len(ordenes) + 1
-                cliente = azar_de("ot", numero).choice(clientes)
-                ordenes.append(nueva_orden(numero, tipo, direccion, region, fecha, hora, cliente))
+                azar = azar_de(semilla, "ot", numero)
+                ordenes.append(nueva_orden(
+                    numero, tipo, direccion, region, programada_utc(fecha, hora), azar.choice(clientes), azar,
+                ))
     return ordenes
 
 
@@ -114,15 +119,26 @@ class FuenteDatos:
     def __init__(self) -> None:
         self.reiniciar()
 
-    def reiniciar(self) -> None:
+    def reiniciar(self, semilla: Optional[int] = None) -> None:
+        """Técnicos y clientes salen siempre iguales; OTs e historial dependen de `semilla`.
+
+        Sin `semilla` se sortea una nueva; queda en `self.semilla` para poder reproducir la corrida.
+        """
         fijar_semillas()
         self.tecnicos = _generar_tecnicos()
         self.clientes = _generar_clientes()
-        self.ordenes = _generar_ordenes(self.clientes)
-        historial, self.documentos_inicio, self.comprobantes = generar_historial(
-            self.tecnicos, self.clientes, primer_numero=len(self.ordenes) + 1
+
+        self.semilla = semilla if semilla is not None else random.SystemRandom().randrange(1, 2**31)
+        fijar_semillas(self.semilla)
+        self.ordenes = _generar_ordenes(self.clientes, self.semilla)
+        historial = generar_historial(
+            self.tecnicos, self.clientes, primer_numero=len(self.ordenes) + 1, semilla=self.semilla
         )
-        self.ordenes += historial
+        self.ordenes += historial.ordenes
+        self.documentos_inicio = historial.documentos_inicio
+        self.comprobantes = historial.comprobantes
+        self.asignaciones = historial.asignaciones
+        self.historial_cargado_en_bd = False
 
     def buscar_tecnico(self, tecnico_id: str) -> Optional[dict]:
         return next((t for t in self.tecnicos if t["id"] == tecnico_id), None)

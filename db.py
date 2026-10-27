@@ -1,26 +1,12 @@
-"""Acceso a PostgreSQL (Render). La tabla `asignacion` es un log de eventos: solo se inserta."""
+"""Acceso a PostgreSQL (Render). La tabla `asignacion` es un log de eventos: solo se inserta.
 
-import logging
+La API nunca modifica el esquema: los cambios a la tabla se ejecutan a mano en la BD.
+"""
+
 import os
 from contextlib import contextmanager
 
 import psycopg2
-
-log = logging.getLogger(__name__)
-
-# Los eventos como "OT descartada" no traen técnico ni otros datos, así que
-# solo `id` y `propuesta_modificada` se mantienen NOT NULL.
-COLUMNAS_NULLABLE = [
-    "id_propuesta",
-    "id_aceptada",
-    "id_orden_trabajo",
-    "fecha_asignacion",
-    "fecha_orden_de_trabajo",
-    "motivo_reprogramacion",
-    "usuario_dispatcher",
-    "fecha_generacion",
-    "tipo_modificacion",
-]
 
 # fecha_asignacion y fecha_generacion usan la hora del servidor si vienen en None.
 SQL_INSERTAR_ASIGNACION = """
@@ -28,14 +14,16 @@ SQL_INSERTAR_ASIGNACION = """
         id_orden_trabajo, id_propuesta, id_aceptada,
         fecha_asignacion, fecha_orden_de_trabajo,
         motivo_reprogramacion, usuario_dispatcher,
-        fecha_generacion, propuesta_modificada, tipo_modificacion
+        fecha_generacion, propuesta_modificada, tipo_modificacion,
+        inicio_planificacion, kilometraje_estimado
     ) VALUES (
         %(id_orden_trabajo)s, %(id_propuesta)s, %(id_aceptada)s,
         COALESCE(%(fecha_asignacion)s::timestamp, NOW()::timestamp),
         %(fecha_orden_de_trabajo)s,
         %(motivo_reprogramacion)s, %(usuario_dispatcher)s,
         COALESCE(%(fecha_generacion)s::timestamp, NOW()::timestamp),
-        %(propuesta_modificada)s, %(tipo_modificacion)s
+        %(propuesta_modificada)s, %(tipo_modificacion)s,
+        %(inicio_planificacion)s::timestamp, %(kilometraje_estimado)s::numeric
     )
 """
 
@@ -62,15 +50,9 @@ def conexion():
 
 
 def insertar_asignaciones(registros: list[dict]) -> None:
+    """Los campos que no vengan en un registro se guardan como NULL."""
+    completos = [
+        {"inicio_planificacion": None, "kilometraje_estimado": None, **registro} for registro in registros
+    ]
     with conexion() as conn, conn.cursor() as cur:
-        cur.executemany(SQL_INSERTAR_ASIGNACION, registros)
-
-
-def asegurar_columnas_nullable() -> None:
-    """Se ejecuta al iniciar. Es idempotente; si falla, la API arranca igual."""
-    try:
-        with conexion() as conn, conn.cursor() as cur:
-            for columna in COLUMNAS_NULLABLE:
-                cur.execute(f"ALTER TABLE asignacion ALTER COLUMN {columna} DROP NOT NULL")
-    except Exception as e:
-        log.warning("No se pudo ajustar el esquema de 'asignacion' al iniciar: %s", e)
+        cur.executemany(SQL_INSERTAR_ASIGNACION, completos)

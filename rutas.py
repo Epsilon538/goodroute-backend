@@ -108,19 +108,33 @@ def root():
             "GET  /api/v1/ordenes/{id}",
             "PATCH /api/v1/ordenes/{id}/asignar-tecnico",
             "POST /api/asignar-tecnicos",
-            "GET  /api/reset",
+            "GET  /api/asignaciones?fecha=",
+            "POST /api/asignaciones/cargar-historial",
+            "GET  /api/reset?semilla=",
         ],
     }
 
 
 @router.get("/api/reset", tags=["Admin"], summary="Reiniciar y regenerar todos los datos")
-def reset():
-    """Regenera en memoria técnicos, clientes y OTs (vuelve al estado inicial)."""
-    fuente.reiniciar()
+def reset(
+    semilla: Optional[int] = Query(
+        default=None,
+        description="Semilla de las OTs y el historial. Sin ella se sortea una nueva; la respuesta la informa.",
+    ),
+):
+    """Regenera en memoria técnicos, clientes, OTs e historial.
+
+    Los técnicos y clientes salen siempre iguales; las OTs cambian en cada reset
+    (con la misma `semilla` y el mismo día se repiten). Las filas ya guardadas en la BD
+    no se tocan, y sus ids de OT pasan a corresponder a las OTs nuevas.
+    """
+    fuente.reiniciar(semilla)
     return {
         "mensaje": "Reset completado. Todos los datos han sido regenerados.",
+        "semilla": fuente.semilla,
         "tecnicos": len(fuente.tecnicos),
         "ordenes": len(fuente.ordenes),
+        "asignaciones_historial": len(fuente.asignaciones),
     }
 
 
@@ -172,6 +186,47 @@ def get_orden(orden_id: str):
     }
 
 
+@router.get("/api/asignaciones", tags=["Asignaciones"], summary="Historia de la tabla de asignaciones (HU-11)")
+def get_asignaciones(
+    fecha: Optional[str] = Query(
+        default=None,
+        description="Filtra por fecha de la OT (YYYY-MM-DD)",
+        examples=["2026-10-05"],
+    ),
+):
+    """Filas del historial en el formato de la tabla `asignacion` (snake_case).
+
+    Incluye la confirmación de cada OT y, cuando hubo, la reprogramación. No incluye lo que se
+    registra en vivo con el PATCH o el POST de asignación: eso va directo a la BD.
+    """
+    filas = fuente.asignaciones
+    if fecha is not None:
+        _validar_fecha(fecha)
+        filas = [f for f in filas if f["fecha_orden_de_trabajo"].startswith(fecha)]
+    return filas
+
+
+@router.post(
+    "/api/asignaciones/cargar-historial",
+    tags=["Asignaciones"],
+    summary="Insertar el historial de asignaciones en la BD",
+)
+def cargar_historial_asignaciones(
+    forzar: bool = Query(default=False, description="Insertar de nuevo aunque este historial ya se haya cargado"),
+):
+    """Inserta en `asignacion` las filas de `GET /api/asignaciones`.
+
+    La tabla solo crece: cada carga agrega filas. Por eso, sin `forzar`, se rechaza una segunda
+    carga del mismo historial (el reset genera uno nuevo).
+    """
+    if fuente.historial_cargado_en_bd and not forzar:
+        raise HTTPException(409, "Este historial ya se cargó en la BD. Use forzar=true para insertarlo de nuevo.")
+    error = _guardar(fuente.asignaciones)
+    if error is None:
+        fuente.historial_cargado_en_bd = True
+    return {"insertados": 0 if error else len(fuente.asignaciones), "error": error}
+
+
 # --- Asignación ---
 
 @router_v1.patch(
@@ -215,6 +270,8 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
         "fecha_generacion": None,
         "propuesta_modificada": body.motivo_reprogramacion is not None,
         "tipo_modificacion": body.tipo_modificacion,
+        "inicio_planificacion": body.inicio_planificacion,
+        "kilometraje_estimado": body.kilometraje_estimado,
     }])
 
     respuesta = {**orden, "guardado_en_bd": error is None}
@@ -239,6 +296,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
     actualizadas, errores, registros = [], [], []
 
     for ruta in body.rutas:
+        km_por_ot = {parada.ot_id: parada.kilometraje_estimado for parada in ruta.paradas}
         if fuente.buscar_tecnico(ruta.tecnico_id) is None:
             errores += [
                 {"ot_id": ot_id, "error": f"Tecnico con id '{ruta.tecnico_id}' no encontrado en el sistema."}
@@ -277,6 +335,8 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 "fecha_generacion": body.generado_en,
                 "propuesta_modificada": not ruta.aceptada_sin_modificacion,
                 "tipo_modificacion": tipo_modificacion,
+                "inicio_planificacion": body.inicio_planificacion,
+                "kilometraje_estimado": km_por_ot.get(ot_id),
             })
 
     error_bd = _guardar(registros) if registros else None
