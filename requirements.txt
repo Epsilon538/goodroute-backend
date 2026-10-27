@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+faker
+psycopg2-binary

@@ -1,0 +1,183 @@
+{
+  "Valparaíso": [
+    {
+      "lugar": "Municipalidad de Valparaíso",
+      "direccion": "Condell 1490",
+      "comuna": "Valparaíso"
+    },
+    {
+      "lugar": "Congreso Nacional de Chile",
+      "direccion": "Avenida Pedro Montt 1730",
+      "comuna": "Valparaíso"
+    },
+    {
+      "lugar": "Terminal Rodoviario de Valparaíso",
+      "direccion": "Pedro Montt 2855",
+      "comuna": "Valparaíso"
+    },
+    {
+      "lugar": "Municipalidad de Viña del Mar",
+      "direccion": "Arlegui 615",
+      "comuna": "Viña del Mar"
+    },
+    {
+      "lugar": "Mall Marina Arauco",
+      "direccion": "Avenida Libertad 1348",
+      "comuna": "Viña del Mar"
+    },
+    {
+      "lugar": "Hospital Dr. Gustavo Fricke",
+      "direccion": "Avenida Álvarez 1532",
+      "comuna": "Viña del Mar"
+    },
+    {
+      "lugar": "Quinta Vergara",
+      "direccion": "Errázuriz 563",
+      "comuna": "Viña del Mar"
+    },
+    {
+      "lugar": "Municipalidad de Quilpué",
+      "direccion": "Augusto Carozzi 841",
+      "comuna": "Quilpué"
+    },
+    {
+      "lugar": "Mall Plaza del Sol Quilpué",
+      "direccion": "Avenida Diego Portales 822",
+      "comuna": "Quilpué"
+    },
+    {
+      "lugar": "Municipalidad de Villa Alemana",
+      "direccion": "Santiago 675",
+      "comuna": "Villa Alemana"
+    }
+  ],
+  "Metropolitana de Santiago": [
+    {
+      "lugar": "Teatro Municipal de Santiago",
+      "direccion": "Agustinas 794",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Museo Nacional de Bellas Artes",
+      "direccion": "José Miguel de la Barra 650",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Costanera Center",
+      "direccion": "Avenida Andrés Bello 2425",
+      "comuna": "Providencia"
+    },
+    {
+      "lugar": "Terminal Alameda (Tur Bus)",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 3750",
+      "comuna": "Estación Central"
+    },
+    {
+      "lugar": "Hospital Clínico Universidad de Chile",
+      "direccion": "Avenida Santos Dumont 999",
+      "comuna": "Independencia"
+    },
+    {
+      "lugar": "Mallplaza Vespucio",
+      "direccion": "Avenida Vicuña Mackenna 7110",
+      "comuna": "La Florida"
+    },
+    {
+      "lugar": "Parque Arauco",
+      "direccion": "Avenida Kennedy 5413",
+      "comuna": "Las Condes"
+    },
+    {
+      "lugar": "Planetario Usach",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 3349",
+      "comuna": "Estación Central"
+    },
+    {
+      "lugar": "Estadio Nacional",
+      "direccion": "Avenida Grecia 2001",
+      "comuna": "Ñuñoa"
+    },
+    {
+      "lugar": "Biblioteca Nacional de Chile",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 651",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Museo de la Memoria y los Derechos Humanos",
+      "direccion": "Matucana 501",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Centro Cultural Gabriela Mistral (GAM)",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 227",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Clínica Santa María",
+      "direccion": "Avenida Santa María 0500",
+      "comuna": "Providencia"
+    },
+    {
+      "lugar": "Mercado Central",
+      "direccion": "San Pablo 967",
+      "comuna": "Santiago"
+    },
+    {
+      "lugar": "Universidad de Santiago de Chile",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 3363",
+      "comuna": "Estación Central"
+    }
+  ],
+  "Libertador General Bernardo O'Higgins": [
+    {
+      "lugar": "Municipalidad de Rancagua",
+      "direccion": "Plaza de Los Héroes 445",
+      "comuna": "Rancagua"
+    },
+    {
+      "lugar": "Mallplaza América Rancagua",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 201",
+      "comuna": "Rancagua"
+    },
+    {
+      "lugar": "Hospital Regional de Rancagua",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 3065",
+      "comuna": "Rancagua"
+    },
+    {
+      "lugar": "Terminal O'Higgins Rancagua",
+      "direccion": "Avenida Bornand 30",
+      "comuna": "Rancagua"
+    },
+    {
+      "lugar": "Universidad de O'Higgins (Campus Rancagua)",
+      "direccion": "Avenida Libertador Bernardo O'Higgins 611",
+      "comuna": "Rancagua"
+    },
+    {
+      "lugar": "Municipalidad de San Fernando",
+      "direccion": "Carampangue 865",
+      "comuna": "San Fernando"
+    },
+    {
+      "lugar": "Hospital San Juan de Dios de San Fernando",
+      "direccion": "Carelmapu 2",
+      "comuna": "San Fernando"
+    },
+    {
+      "lugar": "Municipalidad de Santa Cruz",
+      "direccion": "Plaza de Armas 242",
+      "comuna": "Santa Cruz"
+    },
+    {
+      "lugar": "Casino Colchagua",
+      "direccion": "Avenida Errázuriz 501",
+      "comuna": "Santa Cruz"
+    },
+    {
+      "lugar": "Municipalidad de Pichilemu",
+      "direccion": "Ángel Gaete 365",
+      "comuna": "Pichilemu"
+    }
+  ]
+}
