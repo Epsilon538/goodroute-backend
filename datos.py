@@ -1,28 +1,34 @@
-"""Datos simulados del sistema externo (técnicos, OTs y disponibilidad), en memoria."""
+"""Datos simulados del backoffice (técnicos, clientes y OTs), en memoria.
 
-import json
+El formato sigue el modelo de datos del backoffice v3.0: campos en camelCase,
+fechas en UTC (ISO 8601 con sufijo Z) y disponibilidad como patrón semanal.
+Las OTs de hoy en adelante nacen `porAsignar`; las anteriores son historial (`historial.py`).
+"""
+
 import random
 import uuid
 from datetime import date, timedelta
-from pathlib import Path
 from typing import Optional
 
-from faker import Faker
-
+from generadores import (
+    DIRECCIONES,
+    HORA_PRIMERA_OT_UTC,
+    HORA_ULTIMA_OT_UTC,
+    NAMESPACE,
+    ORDENES_POR_REGION,
+    azar_de,
+    fake,
+    fijar_semillas,
+    nombre_usuario,
+    nueva_orden,
+    rut_aleatorio,
+    telefono_aleatorio,
+)
+from historial import generar_historial
 from modelos import TIPOS_OT
 
-SEMILLA = 42
-# Namespace fijo: uuid4 ignora random.seed y cambiaría los IDs en cada reinicio.
-NAMESPACE = uuid.UUID("6f1c2b8e-3d4a-4e5f-9a7b-1c2d3e4f5a6b")
-
 DIAS_ORDENES = 5
-DIAS_DISPONIBILIDAD = 14
-
-# Las horas de la API son UTC. Las OTs parten entre 8:00 y 20:00 hora de Chile
-# (la última termina antes de las 21:00); se convierten sumando el desfase.
-DESFASE_UTC_CHILE = 3
-HORA_PRIMERA_OT_CHILE = 8
-HORA_ULTIMA_OT_CHILE = 20
+CANTIDAD_CLIENTES = 8
 
 # (tipo, región, cantidad)
 TECNICOS_POR_GRUPO = [
@@ -32,81 +38,69 @@ TECNICOS_POR_GRUPO = [
     ("externo", "Libertador General Bernardo O'Higgins", 3),
 ]
 
-# (región, OTs por día)
-ORDENES_POR_REGION = [
-    ("Valparaíso", 8),
-    ("Metropolitana de Santiago", 5),
-    ("Libertador General Bernardo O'Higgins", 5),
-]
-
-# { región: [ {lugar, direccion, comuna} ] }
-DIRECCIONES = json.loads(
-    (Path(__file__).parent / "direcciones_reales_chile.json").read_text(encoding="utf-8")
-)
-
-fake = Faker("es_CL")
-
-
-def _fijar_semillas() -> None:
-    random.seed(SEMILLA)
-    Faker.seed(SEMILLA)
-
 
 def _generar_tecnicos() -> list[dict]:
+    """Sin horario fijo: la disponibilidad semanal (lunes a domingo) es todo true."""
     tecnicos = []
     for tipo, region, cantidad in TECNICOS_POR_GRUPO:
         comunas = [d["comuna"] for d in DIRECCIONES[region]]
         for _ in range(cantidad):
+            numero = len(tecnicos) + 1
+            nombre = fake.first_name()
+            apellidos = f"{fake.last_name()} {fake.last_name()}"
+            zona = random.choice(comunas)
+            azar = azar_de("tecnico", numero)
+            usuario = nombre_usuario(nombre, apellidos)
             tecnicos.append({
-                "id": str(uuid.uuid5(NAMESPACE, f"tecnico-{len(tecnicos) + 1}")),
-                "nombre": fake.first_name(),
-                "apellidos": f"{fake.last_name()} {fake.last_name()}",
+                "id": str(uuid.uuid5(NAMESPACE, f"tecnico-{numero}")),
+                "nombre": nombre,
+                "apellidos": apellidos,
+                "rut": rut_aleatorio(azar),
                 "tipo": tipo,
-                "zona": random.choice(comunas),
+                "zona": zona,
+                "ciudad": zona,
+                "comuna": zona,
                 "region": region,
+                "telefono": telefono_aleatorio(azar),
+                "email": f"{usuario}@example.com",
+                "usuario": usuario,
+                "activo": True,
+                "disponibilidad": [True] * 7,
             })
     return tecnicos
 
 
-def _generar_ordenes() -> list[dict]:
-    """Todas las OTs nacen `por_asignar` y sin técnico."""
+def _generar_clientes() -> list[dict]:
+    clientes = []
+    for numero in range(1, CANTIDAD_CLIENTES + 1):
+        azar = azar_de("cliente", numero)
+        nombre, apellido = fake.first_name(), fake.last_name()
+        region = azar.choice(list(DIRECCIONES.values()))
+        clientes.append({
+            "id": str(uuid.uuid5(NAMESPACE, f"cliente-{numero}")),
+            "razonSocial": fake.company(),
+            "rut": rut_aleatorio(azar),
+            "direccionFactura": azar.choice(region)["direccion"],
+            "contactoNombre": f"{nombre} {apellido}",
+            "contactoTelefono": telefono_aleatorio(azar),
+            "contactoEmail": f"{nombre_usuario(nombre, apellido)}@example.com",
+        })
+    return clientes
+
+
+def _generar_ordenes(clientes: list[dict]) -> list[dict]:
     ordenes = []
     hoy = date.today()
     for offset in range(DIAS_ORDENES):
         fecha = hoy + timedelta(days=offset)
         for region, cantidad in ORDENES_POR_REGION:
             for direccion in random.sample(DIRECCIONES[region], cantidad):
-                hora = random.randint(
-                    HORA_PRIMERA_OT_CHILE + DESFASE_UTC_CHILE,
-                    HORA_ULTIMA_OT_CHILE + DESFASE_UTC_CHILE,
-                )
-                ordenes.append({
-                    "id": f"OT-{len(ordenes) + 1:04d}",
-                    "tipo": random.choice(TIPOS_OT),
-                    "estado": "por_asignar",
-                    "tecnico_id": None,
-                    "direccion_instalacion": direccion["direccion"],
-                    "comuna": direccion["comuna"],
-                    "region": region,
-                    "fecha_programada": fecha.isoformat(),
-                    "hora_programada": f"{hora:02d}:00",
-                })
+                hora = random.randint(HORA_PRIMERA_OT_UTC, HORA_ULTIMA_OT_UTC)
+                tipo = random.choice(TIPOS_OT)
+                numero = len(ordenes) + 1
+                cliente = azar_de("ot", numero).choice(clientes)
+                ordenes.append(nueva_orden(numero, tipo, direccion, region, fecha, hora, cliente))
     return ordenes
-
-
-def _generar_disponibilidades(tecnicos: list[dict]) -> list[dict]:
-    """Los técnicos no tienen horario fijo: todos están disponibles todos los días."""
-    hoy = date.today()
-    return [
-        {
-            "id": str(uuid.uuid5(NAMESPACE, f"disponibilidad-{tecnico['id']}-{fecha.isoformat()}")),
-            "tecnico_id": tecnico["id"],
-            "fecha": fecha.isoformat(),
-            "disponible": True,
-        }
-        for tecnico in tecnicos
-        for fecha in (hoy + timedelta(days=offset) for offset in range(DIAS_DISPONIBILIDAD))
-    ]
 
 
 class FuenteDatos:
@@ -121,16 +115,26 @@ class FuenteDatos:
         self.reiniciar()
 
     def reiniciar(self) -> None:
-        _fijar_semillas()
+        fijar_semillas()
         self.tecnicos = _generar_tecnicos()
-        self.ordenes = _generar_ordenes()
-        self.disponibilidades = _generar_disponibilidades(self.tecnicos)
+        self.clientes = _generar_clientes()
+        self.ordenes = _generar_ordenes(self.clientes)
+        historial, self.documentos_inicio, self.comprobantes = generar_historial(
+            self.tecnicos, self.clientes, primer_numero=len(self.ordenes) + 1
+        )
+        self.ordenes += historial
 
     def buscar_tecnico(self, tecnico_id: str) -> Optional[dict]:
         return next((t for t in self.tecnicos if t["id"] == tecnico_id), None)
 
     def buscar_orden(self, orden_id: str) -> Optional[dict]:
         return next((o for o in self.ordenes if o["id"] == orden_id), None)
+
+    def documento_inicio_de(self, orden_id: str) -> Optional[dict]:
+        return next((d for d in self.documentos_inicio if d["otId"] == orden_id), None)
+
+    def comprobantes_de(self, orden_id: str) -> list[dict]:
+        return [c for c in self.comprobantes if c["otId"] == orden_id]
 
 
 fuente = FuenteDatos()

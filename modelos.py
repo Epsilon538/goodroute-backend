@@ -3,21 +3,28 @@ from typing import Optional
 from pydantic import BaseModel
 
 TIPOS_OT = [
-    "instalacion_simple",
-    "instalacion_con_corte",
+    "instalacionSimple",
+    "instalacionConCorte",
     "mantencion",
     "retiro",
 ]
 
 ESTADOS_OT = [
-    "por_revisar",
-    "por_asignar",
-    "asignacion_por_confirmar",
+    "porRevisar",
+    "porAsignar",
+    "enviadaPlanificacion",
+    "asignacionPorConfirmar",
     "asignada",
-    "en_terreno",
+    "enTerreno",
+    "parcial",
     "finalizada",
-    "enviada_cobranza",
+    "enviadaCobranza",
 ]
+
+ESTADO_POR_ASIGNAR = "porAsignar"
+ESTADO_ASIGNACION_POR_CONFIRMAR = "asignacionPorConfirmar"
+# Estados desde los que una asignación deja la OT en asignacionPorConfirmar.
+ESTADOS_ASIGNABLES = ("porRevisar", "porAsignar", "enviadaPlanificacion")
 
 # Deben coincidir con el CHECK de asignacion.motivo_reprogramacion en la BD.
 MOTIVOS_REPROGRAMACION = [

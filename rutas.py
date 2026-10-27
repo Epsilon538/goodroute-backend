@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date
 from typing import Optional
 
@@ -6,7 +7,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 import db
 from datos import fuente
+from generadores import ahora_utc
 from modelos import (
+    ESTADO_ASIGNACION_POR_CONFIRMAR,
+    ESTADO_POR_ASIGNAR,
+    ESTADOS_ASIGNABLES,
     ESTADOS_OT,
     MOTIVOS_REPROGRAMACION,
     TIPOS_MODIFICACION_PATCH,
@@ -14,9 +19,11 @@ from modelos import (
     AsignarTecnicosRequest,
 )
 
-router = APIRouter()
+router = APIRouter()  # endpoints propios de GoodRoute
+router_v1 = APIRouter(prefix="/api/v1")  # simula el backoffice (modelo de datos v3.0)
 
-ESTADOS_ASIGNABLES = ("por_revisar", "por_asignar")
+FORMATO_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
+FORMATO_HORA = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 LARGO_MAX_TIPO_MODIFICACION = 100  # columna varchar(100)
 
 
@@ -43,21 +50,36 @@ def _validar_fecha(fecha: str) -> None:
         )
 
 
-def _fecha_hora_ot(orden: dict) -> Optional[str]:
-    fecha, hora = orden.get("fecha_programada"), orden.get("hora_programada")
-    if not (fecha and hora):
-        return None
-    if hora.count(":") == 1:
-        hora += ":00"
-    return f"{fecha}T{hora}"
+def _fecha_hora_ot(orden: dict) -> str:
+    """Timestamp de la OT para la BD. Lanza ValueError si la fecha u hora no son válidas.
+
+    En el sistema externo `fechaProgramada` es texto libre, así que no se asume el formato.
+    """
+    fecha, hora = orden.get("fechaProgramada"), orden.get("horaProgramada")
+    valida = (
+        isinstance(fecha, str) and FORMATO_FECHA.fullmatch(fecha)
+        and isinstance(hora, str) and FORMATO_HORA.fullmatch(hora)
+    )
+    if valida:
+        try:
+            date.fromisoformat(fecha)
+        except ValueError:
+            valida = False
+    if not valida:
+        raise ValueError(
+            f"La OT '{orden['id']}' tiene fechaProgramada '{fecha}' y horaProgramada '{hora}': "
+            "se esperaba YYYY-MM-DD y HH:MM."
+        )
+    return f"{fecha}T{hora}:00"
 
 
 def _asignar_en_memoria(orden: dict, tecnico_id: Optional[str]) -> None:
-    orden["tecnico_id"] = tecnico_id
+    orden["tecnicoId"] = tecnico_id
     if tecnico_id is None:
-        orden["estado"] = "por_asignar"
+        orden["estado"] = ESTADO_POR_ASIGNAR
     elif orden["estado"] in ESTADOS_ASIGNABLES:
-        orden["estado"] = "asignacion_por_confirmar"
+        orden["estado"] = ESTADO_ASIGNACION_POR_CONFIRMAR
+    orden["updatedAt"] = ahora_utc()
 
 
 def _guardar(registros: list[dict]) -> Optional[str]:
@@ -81,41 +103,40 @@ def root():
         "version": "1.0.0",
         "docs": "/docs",
         "endpoints_disponibles": [
-            "GET  /api/tecnicos",
-            "GET  /api/ordenes?estado=&fecha=",
-            "GET  /api/reset",
-            "GET  /api/disponibilidad",
-            "PATCH /api/ordenes/{id}/tecnico",
+            "GET  /api/v1/tecnicos",
+            "GET  /api/v1/ordenes?estado=&fecha=",
+            "GET  /api/v1/ordenes/{id}",
+            "PATCH /api/v1/ordenes/{id}/asignar-tecnico",
             "POST /api/asignar-tecnicos",
+            "GET  /api/reset",
         ],
     }
 
 
 @router.get("/api/reset", tags=["Admin"], summary="Reiniciar y regenerar todos los datos")
 def reset():
-    """Regenera en memoria técnicos, OTs y disponibilidades (vuelve al estado inicial)."""
+    """Regenera en memoria técnicos, clientes y OTs (vuelve al estado inicial)."""
     fuente.reiniciar()
     return {
         "mensaje": "Reset completado. Todos los datos han sido regenerados.",
         "tecnicos": len(fuente.tecnicos),
         "ordenes": len(fuente.ordenes),
-        "disponibilidades": len(fuente.disponibilidades),
     }
 
 
 # --- Lecturas ---
 
-@router.get("/api/tecnicos", tags=["Tecnicos"], summary="Obtener lista de tecnicos")
+@router_v1.get("/tecnicos", tags=["Tecnicos"], summary="Obtener lista de tecnicos")
 def get_tecnicos():
     return fuente.tecnicos
 
 
-@router.get("/api/ordenes", tags=["Ordenes de Trabajo"], summary="Obtener lista de ordenes de trabajo")
+@router_v1.get("/ordenes", tags=["Ordenes de Trabajo"], summary="Obtener lista de ordenes de trabajo")
 def get_ordenes(
     estado: Optional[str] = Query(
         default=None,
         description=f"Filtra por estado: {' | '.join(ESTADOS_OT)}",
-        examples=["por_asignar"],
+        examples=["porAsignar"],
     ),
     fecha: Optional[str] = Query(
         default=None,
@@ -130,28 +151,31 @@ def get_ordenes(
         ordenes = [o for o in ordenes if o["estado"] == estado]
     if fecha is not None:
         _validar_fecha(fecha)
-        ordenes = [o for o in ordenes if o["fecha_programada"] == fecha]
+        ordenes = [o for o in ordenes if o["fechaProgramada"] == fecha]
     return ordenes
 
 
-@router.get("/api/disponibilidad", tags=["Disponibilidad"], summary="Obtener disponibilidades de tecnicos")
-def get_disponibilidad(
-    fecha: Optional[str] = Query(
-        default=None,
-        description="Filtra por fecha (YYYY-MM-DD)",
-        examples=["2026-10-05"],
-    ),
-):
-    if fecha is None:
-        return fuente.disponibilidades
-    _validar_fecha(fecha)
-    return [d for d in fuente.disponibilidades if d["fecha"] == fecha]
+@router_v1.get("/ordenes/{orden_id}", tags=["Ordenes de Trabajo"], summary="Obtener el detalle de una orden de trabajo")
+def get_orden(orden_id: str):
+    """La OT con su `documentoInicio` (null si el técnico no marcó llegada) y sus `comprobantes`.
+
+    Los nombres de esas dos propiedades están por confirmar con el equipo del sistema externo.
+    El detalle omite dispositivos, costos e historial de eventos.
+    """
+    orden = fuente.buscar_orden(orden_id)
+    if orden is None:
+        raise HTTPException(404, f"Orden de trabajo con id '{orden_id}' no encontrada.")
+    return {
+        **orden,
+        "documentoInicio": fuente.documento_inicio_de(orden_id),
+        "comprobantes": fuente.comprobantes_de(orden_id),
+    }
 
 
 # --- Asignación ---
 
-@router.patch(
-    "/api/ordenes/{orden_id}/tecnico",
+@router_v1.patch(
+    "/ordenes/{orden_id}/asignar-tecnico",
     tags=["Ordenes de Trabajo"],
     summary="Asignar o reprogramar tecnico de una orden de trabajo",
 )
@@ -160,7 +184,7 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
 
     - **Asignar**: `tecnico_id` sin `motivo_reprogramacion`.
     - **Reprogramar**: `tecnico_id` nuevo con `motivo_reprogramacion`.
-    - **Descartar**: `tecnico_id` null; la OT vuelve a `por_asignar`.
+    - **Descartar**: `tecnico_id` null; la OT vuelve a `porAsignar`.
     """
     orden = fuente.buscar_orden(orden_id)
     if orden is None:
@@ -172,7 +196,12 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
     if body.tipo_modificacion is not None:
         _validar_valor("tipo_modificacion", body.tipo_modificacion, TIPOS_MODIFICACION_PATCH)
 
-    tecnico_anterior = orden["tecnico_id"]
+    try:
+        fecha_ot = _fecha_hora_ot(orden)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+    tecnico_anterior = orden["tecnicoId"]
     _asignar_en_memoria(orden, body.tecnico_id)
 
     error = _guardar([{
@@ -180,7 +209,7 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
         "id_propuesta": tecnico_anterior,
         "id_aceptada": body.tecnico_id,
         "fecha_asignacion": None,
-        "fecha_orden_de_trabajo": _fecha_hora_ot(orden),
+        "fecha_orden_de_trabajo": fecha_ot,
         "motivo_reprogramacion": body.motivo_reprogramacion,
         "usuario_dispatcher": body.revisado_por.nombre if body.revisado_por else None,
         "fecha_generacion": None,
@@ -229,6 +258,12 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 errores.append({"ot_id": ot_id, "error": f"OT '{ot_id}' no encontrada en el sistema."})
                 continue
 
+            try:
+                fecha_ot = _fecha_hora_ot(orden)
+            except ValueError as e:
+                errores.append({"ot_id": ot_id, "error": str(e)})
+                continue
+
             _asignar_en_memoria(orden, ruta.tecnico_id)
             actualizadas.append({"ot_id": ot_id, "tecnico_id": ruta.tecnico_id, "estado": orden["estado"]})
             registros.append({
@@ -236,7 +271,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 "id_propuesta": propuesta_por_ot.get(ot_id),
                 "id_aceptada": ruta.tecnico_id,
                 "fecha_asignacion": body.revisado_en,
-                "fecha_orden_de_trabajo": _fecha_hora_ot(orden),
+                "fecha_orden_de_trabajo": fecha_ot,
                 "motivo_reprogramacion": None,
                 "usuario_dispatcher": body.revisado_por.nombre,
                 "fecha_generacion": body.generado_en,
