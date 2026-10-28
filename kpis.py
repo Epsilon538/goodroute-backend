@@ -14,7 +14,7 @@ sumando las partes y no promediando. En TPL, TPS y TTR el numerador son minutos.
 `tecnico_id` es opcional: sin él se calcula sobre todos los técnicos.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import db
@@ -243,7 +243,12 @@ def calcular(sigla: str, fecha: str, fuente, tecnico_id: Optional[str] = None) -
     if tecnico_id and not datos["por_tecnico"]:
         raise ValueError(f"{sigla} no se calcula por técnico")
 
-    crudo = _crudo(sigla, fecha, fuente, tecnico_id)
+    return _normalizar(sigla, fecha, tecnico_id, _crudo(sigla, fecha, fuente, tecnico_id))
+
+
+def _normalizar(sigla: str, fecha: str, tecnico_id: Optional[str], crudo) -> dict:
+    """Arma la respuesta de un KPI a partir de su resultado crudo (entero, o numerador y denominador)."""
+    datos = CATALOGO[sigla]
     if datos["tipo"] == "conteo":
         numerador, denominador, valor = crudo, None, crudo
     else:
@@ -260,3 +265,114 @@ def calcular(sigla: str, fecha: str, fuente, tecnico_id: Optional[str] = None) -
         "denominador": denominador,
         "valor": valor,
     }
+
+
+# --- Rango de fechas: varias fechas (y técnicos) en una sola pasada ---
+
+SIGLAS_ASIGNACION = ["OTA", "OTR", "TAR", "TPL"]
+
+
+def _asignacion_por_dia_y_tecnico(desde: str, hasta: str) -> dict:
+    """Agrega `asignacion` por día de la OT y técnico aceptado, con una sola consulta.
+
+    Devuelve {(fecha, id_aceptada): {ota, otr, tar_num, tar_den, tpl_min, tpl_n}}. `id_aceptada` puede ser
+    None (filas sin técnico). El global de un día es la suma de todos sus grupos, igual que sin filtro.
+    """
+    with db.conexion() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                fecha_orden_de_trabajo::date AS dia,
+                id_aceptada,
+                COUNT(*) FILTER (WHERE motivo_reprogramacion IS NULL AND id_aceptada IS NOT NULL),
+                COUNT(*) FILTER (WHERE motivo_reprogramacion IS NOT NULL),
+                COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL AND propuesta_modificada = false),
+                COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL OR propuesta_modificada = true),
+                COALESCE(SUM(EXTRACT(EPOCH FROM fecha_asignacion - inicio_planificacion) / 60)
+                    FILTER (WHERE inicio_planificacion IS NOT NULL AND fecha_asignacion IS NOT NULL), 0),
+                COUNT(*) FILTER (WHERE inicio_planificacion IS NOT NULL AND fecha_asignacion IS NOT NULL)
+            FROM asignacion
+            WHERE fecha_orden_de_trabajo::date BETWEEN %s AND %s
+            GROUP BY 1, 2
+            """,
+            (desde, hasta),
+        )
+        filas = cur.fetchall()
+    return {
+        (str(dia), tecnico): {
+            "ota": ota, "otr": otr, "tar_num": tar_num, "tar_den": tar_den,
+            "tpl_min": float(tpl_min), "tpl_n": tpl_n,
+        }
+        for dia, tecnico, ota, otr, tar_num, tar_den, tpl_min, tpl_n in filas
+    }
+
+
+def _crudo_asignacion(sigla: str, grupos: list[dict]):
+    """Resultado crudo de un KPI de asignación sumando los grupos (técnicos) que corresponden."""
+    suma = lambda clave: sum(g[clave] for g in grupos)
+    if sigla == "OTA":
+        return suma("ota")
+    if sigla == "OTR":
+        return suma("otr")
+    if sigla == "TAR":
+        return {"numerador": suma("tar_num"), "denominador": suma("tar_den")}
+    return {"numerador": round(suma("tpl_min"), 2), "denominador": suma("tpl_n")}  # TPL
+
+
+def fechas_entre(desde: str, hasta: str) -> list[str]:
+    inicio, fin = date.fromisoformat(desde), date.fromisoformat(hasta)
+    return [(inicio + timedelta(days=i)).isoformat() for i in range((fin - inicio).days + 1)]
+
+
+def calcular_rango(
+    desde: str,
+    hasta: str,
+    fuente,
+    tecnico_id: Optional[str] = None,
+    por_tecnico: bool = False,
+) -> tuple[list[dict], list[dict]]:
+    """Calcula todos los KPI para cada fecha entre `desde` y `hasta` (inclusive).
+
+    Sin `tecnico_id` ni `por_tecnico`: una fila por fecha y KPI, sobre todos los técnicos.
+    Con `por_tecnico`: además, una fila por fecha, técnico y KPI que se calcule por técnico.
+    Con `tecnico_id`: solo las filas de ese técnico.
+
+    Los de asignación salen de una sola consulta SQL para todo el rango. Si esa consulta falla, sus
+    KPI se reportan una vez en `errores` y los demás se devuelven igual.
+    Devuelve (kpis, errores); cada KPI tiene la misma forma que `calcular`.
+    """
+    fechas = fechas_entre(desde, hasta)
+    if tecnico_id:
+        tecnicos = [tecnico_id]
+    elif por_tecnico:
+        tecnicos = [None] + [t["id"] for t in fuente.tecnicos]
+    else:
+        tecnicos = [None]
+
+    errores = []
+    por_dia: Optional[dict[str, dict]] = None  # {fecha: {id_aceptada: grupo}}
+    try:
+        por_dia = {}
+        for (dia, tecnico), grupo in _asignacion_por_dia_y_tecnico(desde, hasta).items():
+            por_dia.setdefault(dia, {})[tecnico] = grupo
+    except Exception as e:
+        por_dia = None
+        errores = [{"sigla": sigla, "error": str(e)} for sigla in SIGLAS_ASIGNACION
+                   if not (tecnico_id and not CATALOGO[sigla]["por_tecnico"])]
+
+    resultados = []
+    for fecha in fechas:
+        grupos_del_dia = (por_dia or {}).get(fecha, {})
+        for tecnico in tecnicos:
+            for sigla, datos in CATALOGO.items():
+                if tecnico and not datos["por_tecnico"]:
+                    continue
+                if sigla in SIGLAS_ASIGNACION:
+                    if por_dia is None:
+                        continue
+                    grupos = list(grupos_del_dia.values()) if tecnico is None else [grupos_del_dia[tecnico]] if tecnico in grupos_del_dia else []
+                    crudo = _crudo_asignacion(sigla, grupos)
+                else:
+                    crudo = _crudo(sigla, fecha, fuente, tecnico)
+                resultados.append(_normalizar(sigla, fecha, tecnico, crudo))
+    return resultados, errores

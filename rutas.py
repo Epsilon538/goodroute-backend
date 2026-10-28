@@ -138,6 +138,7 @@ def root():
             "PATCH /api/v1/ordenes/{id}/asignar-tecnico",
             "POST /api/asignar-tecnicos",
             "GET  /api/kpis?fecha=&tecnico_id=",
+            "GET  /api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=",
             "GET  /api/kpis/{sigla}?fecha=&tecnico_id=",
             "GET  /api/asignaciones?fecha=",
             "POST /api/asignaciones/cargar-historial",
@@ -245,6 +246,46 @@ def get_kpis(
         "kpis": resultados,
         "errores": errores,
         "no_calculados_por_tecnico": omitidos,
+    }
+
+
+MAX_DIAS_RANGO_KPI = 93
+
+
+@router.get("/api/kpis/rango", tags=["KPIs"], summary="Todos los KPI para un rango de fechas, opcionalmente por técnico")
+def get_kpis_rango(
+    fecha_desde: str = Query(description="Primera fecha del rango, inclusive (YYYY-MM-DD)", examples=["2026-09-27"]),
+    fecha_hasta: str = Query(description="Última fecha del rango, inclusive (YYYY-MM-DD)", examples=["2026-11-03"]),
+    por_tecnico: bool = Query(default=False, description="Agrega el desglose de todos los técnicos"),
+    tecnico_id: Optional[str] = Query(default=None, description="Devuelve solo las filas de este técnico"),
+):
+    """Devuelve los KPI de cada fecha del rango en una sola llamada (máximo 93 días).
+
+    `kpis` es una lista plana; cada elemento tiene la misma forma que en `GET /api/kpis`
+    (`sigla`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`...). Sin `por_tecnico` ni `tecnico_id`
+    hay una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` null). Con `por_tecnico=true` se
+    suman las filas de cada técnico (solo los KPI que se calculan por técnico, o sea sin TPL ni OTP). Con
+    `tecnico_id` solo vienen las de ese técnico. No se puede pasar `por_tecnico` y `tecnico_id` juntos.
+    Si falla la BD, los KPI de asignación (OTA, OTR, TAR, TPL) quedan en `errores` y el resto se devuelve igual.
+    """
+    _validar_fecha(fecha_desde)
+    _validar_fecha(fecha_hasta)
+    dias = (date.fromisoformat(fecha_hasta) - date.fromisoformat(fecha_desde)).days + 1
+    if dias < 1:
+        raise HTTPException(422, "fecha_desde debe ser anterior o igual a fecha_hasta.")
+    if dias > MAX_DIAS_RANGO_KPI:
+        raise HTTPException(422, f"El rango es de {dias} dias; el maximo es {MAX_DIAS_RANGO_KPI}.")
+    if por_tecnico and tecnico_id:
+        raise HTTPException(422, "Use 'por_tecnico' o 'tecnico_id', no ambos.")
+    _validar_tecnico(tecnico_id)
+    resultados, errores = kpis.calcular_rango(fecha_desde, fecha_hasta, fuente, tecnico_id, por_tecnico)
+    return {
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "por_tecnico": por_tecnico,
+        "tecnico_id": tecnico_id,
+        "kpis": resultados,
+        "errores": errores,
     }
 
 

@@ -18,6 +18,7 @@ Los endpoints que simulan el backoffice llevan el prefijo `/api/v1` y usan el mo
 | GET | `/api/asignaciones` | Historia simulada de la tabla `asignacion` |
 | POST | `/api/asignaciones/cargar-historial` | Inserta esa historia en la BD |
 | GET | `/api/kpis` | Los 8 KPI de una fecha |
+| GET | `/api/kpis/rango` | Los KPI de un rango de fechas, con desglose opcional por técnico |
 | GET | `/api/kpis/{sigla}` | Un KPI de una fecha |
 
 ## Raíz y administración
@@ -187,6 +188,26 @@ Los 8 KPI de una fecha.
 | `tecnico_id` | texto, opcional | Calcula solo sobre ese técnico |
 
 Respuesta: `fecha`, `tecnico_id`, `kpis` (lista), `errores` (lista de `sigla` y `error`) y `no_calculados_por_tecnico`. Si falla el cálculo de alguno (por ejemplo sin conexión a la BD), aparece en `errores` y los demás se devuelven igual. Con `tecnico_id`, TPL y OTP no se calculan y quedan en `no_calculados_por_tecnico`.
+
+### `GET /api/kpis/rango`
+
+Los KPI de todas las fechas de un rango en una sola llamada. Los de asignación (OTA, OTR, TAR, TPL) salen de una única consulta para todo el rango.
+
+| Parámetro | Tipo | Descripción |
+| --- | --- | --- |
+| `fecha_desde` | `YYYY-MM-DD`, obligatorio | Primera fecha, inclusive |
+| `fecha_hasta` | `YYYY-MM-DD`, obligatorio | Última fecha, inclusive |
+| `por_tecnico` | booleano, por defecto `false` | Agrega las filas de cada técnico |
+| `tecnico_id` | texto, opcional | Devuelve solo las filas de ese técnico |
+
+Respuesta: `fecha_desde`, `fecha_hasta`, `por_tecnico`, `tecnico_id`, `kpis` y `errores`. `kpis` es una lista plana y cada elemento tiene la misma forma que en `GET /api/kpis` (`sigla`, `nombre`, `unidad`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`).
+
+- Sin `por_tecnico` ni `tecnico_id`: una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` es `null`).
+- Con `por_tecnico=true`: esas filas globales y, además, una por fecha, técnico y KPI que se calcule por técnico (sin TPL ni OTP).
+- Con `tecnico_id`: solo las filas de ese técnico.
+- Si falla la BD, OTA, OTR, TAR y TPL quedan en `errores` y los demás KPI se devuelven igual.
+
+Errores: 422 si una fecha es inválida, si `fecha_desde` es posterior a `fecha_hasta`, si el rango pasa de 93 días o si se pasan `por_tecnico` y `tecnico_id` juntos; 404 si el técnico no existe.
 
 ### `GET /api/kpis/{sigla}`
 

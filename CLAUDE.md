@@ -47,7 +47,7 @@ GET `/api/v1/ordenes?estado=&fecha=`, GET `/api/v1/ordenes/{orden_id}` (detalle 
 y `comprobantes`), PATCH `/api/v1/ordenes/{orden_id}/asignar-tecnico`.
 
 Propios de GoodRoute: POST `/api/asignar-tecnicos` (lote de una corrida del optimizador),
-GET `/api/kpis?fecha=&tecnico_id=` (los 8 KPI) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
+GET `/api/kpis?fecha=&tecnico_id=` (los 8 KPI), GET `/api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=` (rango, una sola llamada) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
 `/api/asignaciones?fecha=` (historia de la tabla `asignacion`), POST
 `/api/asignaciones/cargar-historial` (la inserta en la BD; sin `forzar=true` rechaza una segunda carga
 del mismo historial), GET `/api/reset?semilla=` y GET `/`.
