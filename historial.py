@@ -22,6 +22,7 @@ from generadores import (
     fake,
     iso_utc,
     nueva_orden,
+    numero_ot,
     programada_utc,
     rut_aleatorio,
 )
@@ -67,8 +68,10 @@ GENERACION_MIN = (1, 3)  # inicio de planificación -> corrida del optimizador
 REVISION_MIN = (5, 25)  # corrida del optimizador -> confirmación de la dispatcher
 MARGEN_REPROGRAMACION_MIN = (60, 900)  # después de la confirmación original
 
-# Anomalía: el día laboral más reciente con al menos DIAS_ATRAS_ANOMALIA días de antigüedad.
-DIAS_ATRAS_ANOMALIA = 8
+# Anomalía: un día laboral por bloque de DIAS_BLOQUE_ANOMALIA días, fijo en el calendario (no depende de
+# cuándo arranca la API). Es el día `DIA_EN_BLOQUE_ANOMALIA` del bloque, o el siguiente día laboral.
+DIAS_BLOQUE_ANOMALIA = 30
+DIA_EN_BLOQUE_ANOMALIA = 12
 PROBABILIDAD_MODIFICADA_ANOMALA = 0.6
 PROBABILIDAD_REPROGRAMACION_ANOMALA = 0.55
 REVISION_ANOMALA_MIN = (60, 120)
@@ -96,26 +99,27 @@ class Historial(NamedTuple):
     asignaciones: list[dict]
 
 
-def generar_historial(tecnicos: list[dict], clientes: list[dict], primer_numero: int, semilla: int) -> Historial:
+def generar_historial(tecnicos: list[dict], clientes: list[dict], semilla: int) -> Historial:
     """Los DIAS_HISTORIAL días previos a hoy."""
     por_region: dict[str, list[dict]] = {}
     for tecnico in tecnicos:
         por_region.setdefault(tecnico["region"], []).append(tecnico)
 
     hoy = date.today()
-    dia_anomalo = _dia_anomalo(hoy)
     resultado = Historial([], [], [], [])
     for dias_atras in range(DIAS_HISTORIAL, 0, -1):
         fecha = hoy - timedelta(days=dias_atras)
-        _generar_dia(fecha, dias_atras == dia_anomalo, por_region, clientes, primer_numero, semilla, resultado)
+        _generar_dia(fecha, _es_dia_anomalo(fecha), por_region, clientes, semilla, resultado)
     return resultado
 
 
-def _dia_anomalo(hoy: date) -> int:
-    dias_atras = DIAS_ATRAS_ANOMALIA
-    while (hoy - timedelta(days=dias_atras)).weekday() >= 5:
-        dias_atras += 1
-    return dias_atras
+def _es_dia_anomalo(fecha: date) -> bool:
+    """Un día laboral por bloque de 30 días, siempre el mismo para una fecha dada."""
+    bloque = fecha.toordinal() // DIAS_BLOQUE_ANOMALIA
+    candidato = date.fromordinal(bloque * DIAS_BLOQUE_ANOMALIA + DIA_EN_BLOQUE_ANOMALIA)
+    while candidato.weekday() >= 5:
+        candidato += timedelta(days=1)
+    return fecha == candidato
 
 
 def _repartir(total: int) -> list[int]:
@@ -129,7 +133,7 @@ def _repartir(total: int) -> list[int]:
     return cantidades
 
 
-def _generar_dia(fecha, anomalo, por_region, clientes, primer_numero, semilla, resultado: Historial) -> None:
+def _generar_dia(fecha, anomalo, por_region, clientes, semilla, resultado: Historial) -> None:
     azar = azar_de(semilla, "historial", fecha.isoformat())
     prob_modificada = PROBABILIDAD_MODIFICADA_ANOMALA if anomalo else PROBABILIDAD_MODIFICADA
     prob_reprogramacion = PROBABILIDAD_REPROGRAMACION_ANOMALA if anomalo else PROBABILIDAD_REPROGRAMACION
@@ -170,9 +174,9 @@ def _generar_dia(fecha, anomalo, por_region, clientes, primer_numero, semilla, r
 
     # 3. OTs numeradas por hora programada; cada técnico las atiende en ese orden
     visitas.sort(key=lambda v: v["programada"])
-    for visita in visitas:
+    for indice, visita in enumerate(visitas):
         visita["orden"] = nueva_orden(
-            primer_numero + len(resultado.ordenes), visita["tipo"], visita["direccion"], visita["region"],
+            numero_ot(fecha, indice), visita["tipo"], visita["direccion"], visita["region"],
             visita["programada"], visita["cliente"], azar,
         )
         resultado.ordenes.append(visita["orden"])

@@ -3,7 +3,8 @@
 El formato sigue el modelo de datos del backoffice v3.0: campos en camelCase,
 fechas en UTC (ISO 8601 con sufijo Z) y disponibilidad como patrón semanal.
 Las OTs de hoy en adelante nacen `porAsignar`; las anteriores son historial (`historial.py`).
-Técnicos y clientes son siempre los mismos; las OTs cambian en cada reset (semilla distinta).
+Técnicos y clientes son siempre los mismos. La API arranca con una semilla fija, así que sus OTs e historial son
+los mismos en cada arranque; `/api/reset` sin semilla sortea otros.
 """
 
 import random
@@ -18,11 +19,13 @@ from generadores import (
     NAMESPACE,
     ORDENES_POR_REGION,
     SEMILLA,
+    SEMILLA_INICIAL,
     azar_de,
     fake,
     fijar_semillas,
     nombre_usuario,
     nueva_orden,
+    numero_ot,
     programada_utc,
     rut_aleatorio,
     telefono_aleatorio,
@@ -92,19 +95,24 @@ def _generar_clientes() -> list[dict]:
 
 
 def _generar_ordenes(clientes: list[dict], semilla: int) -> list[dict]:
+    """OTs de hoy en adelante. Cada fecha se genera con su propio azar y su propia numeración, así que
+    una misma fecha produce las mismas OTs (mismos ids) sin importar el día en que arranque la API."""
     ordenes = []
     hoy = date.today()
     for offset in range(DIAS_ORDENES):
         fecha = hoy + timedelta(days=offset)
+        azar_dia = azar_de(semilla, "futuras", fecha.isoformat())
+        indice = 0
         for region, cantidad in ORDENES_POR_REGION:
-            for direccion in random.sample(DIRECCIONES[region], cantidad):
-                hora = random.randint(HORA_PRIMERA_OT, HORA_ULTIMA_OT)
-                tipo = random.choice(TIPOS_OT)
-                numero = len(ordenes) + 1
+            for direccion in azar_dia.sample(DIRECCIONES[region], cantidad):
+                hora = azar_dia.randint(HORA_PRIMERA_OT, HORA_ULTIMA_OT)
+                tipo = azar_dia.choice(TIPOS_OT)
+                numero = numero_ot(fecha, indice)
                 azar = azar_de(semilla, "ot", numero)
                 ordenes.append(nueva_orden(
                     numero, tipo, direccion, region, programada_utc(fecha, hora), azar.choice(clientes), azar,
                 ))
+                indice += 1
     return ordenes
 
 
@@ -117,12 +125,13 @@ class FuenteDatos:
     """
 
     def __init__(self) -> None:
-        self.reiniciar()
+        self.reiniciar(SEMILLA_INICIAL)
 
     def reiniciar(self, semilla: Optional[int] = None) -> None:
         """Técnicos y clientes salen siempre iguales; OTs e historial dependen de `semilla`.
 
-        Sin `semilla` se sortea una nueva; queda en `self.semilla` para poder reproducir la corrida.
+        El arranque usa `SEMILLA_INICIAL`. Sin `semilla` se sortea una nueva; queda en `self.semilla`
+        para poder reproducir la corrida.
         """
         fijar_semillas()
         self.tecnicos = _generar_tecnicos()
@@ -131,14 +140,11 @@ class FuenteDatos:
         self.semilla = semilla if semilla is not None else random.SystemRandom().randrange(1, 2**31)
         fijar_semillas(self.semilla)
         self.ordenes = _generar_ordenes(self.clientes, self.semilla)
-        historial = generar_historial(
-            self.tecnicos, self.clientes, primer_numero=len(self.ordenes) + 1, semilla=self.semilla
-        )
+        historial = generar_historial(self.tecnicos, self.clientes, semilla=self.semilla)
         self.ordenes += historial.ordenes
         self.documentos_inicio = historial.documentos_inicio
         self.comprobantes = historial.comprobantes
         self.asignaciones = historial.asignaciones
-        self.historial_cargado_en_bd = False
 
     def buscar_tecnico(self, tecnico_id: str) -> Optional[dict]:
         return next((t for t in self.tecnicos if t["id"] == tecnico_id), None)

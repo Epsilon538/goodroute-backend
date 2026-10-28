@@ -40,8 +40,9 @@ Se simulan técnicos, OTs, `disponibilidad` semanal (en el técnico), `Documento
 historial ya ejecutado, para calcular TPS, TTR, OTX y OTP, con su historia de la tabla `asignacion`
 (OTA, OTR, TAR y TPL; `GET /api/asignaciones`).
 
-Los técnicos y clientes son siempre los mismos (semilla fija). Las OTs y el historial cambian en cada
-reset: `GET /api/reset?semilla=N` las repite con la misma semilla. `GET /api/v1/ordenes/{id}` devuelve la OT
+Los técnicos y clientes son siempre los mismos (semilla fija). Las OTs y el historial también son los mismos
+en cada arranque (semilla 2026, ids de OT por fecha), así que coinciden con lo guardado en la BD y no hay que
+recargar nada al reiniciar. `GET /api/reset` sin semilla genera otras; `?semilla=2026` vuelve a las del arranque. `GET /api/v1/ordenes/{id}` devuelve la OT
 con su `documentoInicio` y sus `comprobantes` (los nombres de esas dos propiedades están por
 confirmar con el equipo externo).
 

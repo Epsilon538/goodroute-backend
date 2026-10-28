@@ -56,3 +56,45 @@ def insertar_asignaciones(registros: list[dict]) -> None:
     ]
     with conexion() as conn, conn.cursor() as cur:
         cur.executemany(SQL_INSERTAR_ASIGNACION, completos)
+
+
+# Igual que SQL_INSERTAR_ASIGNACION, pero omite la fila si ya existe una igual (misma OT, técnicos, motivo y
+# fecha de asignación). Sirve para cargar el historial las veces que haga falta sin duplicarlo.
+SQL_ASIGNACION_SI_NO_EXISTE = """
+    INSERT INTO asignacion (
+        id_orden_trabajo, id_propuesta, id_aceptada,
+        fecha_asignacion, fecha_orden_de_trabajo,
+        motivo_reprogramacion, usuario_dispatcher,
+        fecha_generacion, propuesta_modificada, tipo_modificacion,
+        inicio_planificacion, kilometraje_estimado
+    )
+    SELECT
+        %(id_orden_trabajo)s, %(id_propuesta)s, %(id_aceptada)s,
+        COALESCE(%(fecha_asignacion)s::timestamp, NOW()::timestamp),
+        %(fecha_orden_de_trabajo)s,
+        %(motivo_reprogramacion)s, %(usuario_dispatcher)s,
+        COALESCE(%(fecha_generacion)s::timestamp, NOW()::timestamp),
+        %(propuesta_modificada)s, %(tipo_modificacion)s,
+        %(inicio_planificacion)s::timestamp, %(kilometraje_estimado)s::numeric
+    WHERE NOT EXISTS (
+        SELECT 1 FROM asignacion
+        WHERE id_orden_trabajo = %(id_orden_trabajo)s
+          AND id_aceptada IS NOT DISTINCT FROM %(id_aceptada)s
+          AND id_propuesta IS NOT DISTINCT FROM %(id_propuesta)s
+          AND motivo_reprogramacion IS NOT DISTINCT FROM %(motivo_reprogramacion)s
+          AND fecha_asignacion = %(fecha_asignacion)s::timestamp
+    )
+"""
+
+
+def insertar_asignaciones_nuevas(registros: list[dict]) -> int:
+    """Inserta solo las filas que aún no están en `asignacion`. Devuelve cuántas insertó."""
+    completos = [
+        {"inicio_planificacion": None, "kilometraje_estimado": None, **registro} for registro in registros
+    ]
+    insertados = 0
+    with conexion() as conn, conn.cursor() as cur:
+        for registro in completos:
+            cur.execute(SQL_ASIGNACION_SI_NO_EXISTE, registro)
+            insertados += cur.rowcount
+    return insertados

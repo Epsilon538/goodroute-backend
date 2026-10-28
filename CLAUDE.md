@@ -29,7 +29,7 @@ Render arranca con `uvicorn main:app --host 0.0.0.0 --port $PORT`.
 - `datos.py`: técnicos, clientes y OTs simulados en memoria. `FuenteDatos` (instancia `fuente`) expone
   `tecnicos`, `clientes`, `ordenes`, `documentos_inicio`, `comprobantes`, `buscar_tecnico`,
   `buscar_orden`, `documento_inicio_de`, `comprobantes_de`, `asignaciones` (historia de `asignacion`),
-  `semilla` y `reiniciar(semilla=None)`.
+  `semilla` y `reiniciar(semilla=None)` (el arranque usa `SEMILLA_INICIAL`).
 - `historial.py`: historial de 30 días (OTs ejecutadas, documentos de inicio, comprobantes y filas de `asignacion`).
 - `generadores.py`: constantes y utilidades que comparten `datos.py` e `historial.py`.
 - `db.py`: conexión y escrituras en Postgres. Único archivo que inserta en `asignacion`. La API nunca
@@ -49,8 +49,8 @@ y `comprobantes`), PATCH `/api/v1/ordenes/{orden_id}/asignar-tecnico`.
 Propios de GoodRoute: POST `/api/asignar-tecnicos` (lote de una corrida del optimizador),
 GET `/api/kpis?fecha=&tecnico_id=` (los 8 KPI), GET `/api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=` (rango, una sola llamada) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
 `/api/asignaciones?fecha=` (historia de la tabla `asignacion`), POST
-`/api/asignaciones/cargar-historial` (la inserta en la BD; sin `forzar=true` rechaza una segunda carga
-del mismo historial), GET `/api/reset?semilla=` y GET `/`.
+`/api/asignaciones/cargar-historial` (la inserta en la BD, solo las filas que aún no están: se puede
+llamar varias veces sin duplicar), GET `/api/reset?semilla=` y GET `/`.
 
 **Detalle de la OT (HU-26).** `GET /api/v1/ordenes/{id}` agrega `documentoInicio` (null si el técnico no
 marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el equipo externo. La lista
@@ -96,9 +96,14 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
   propios por entidad (`_rng`), para no alterar la secuencia de los datos que ya existían.
 - **Semillas.** Técnicos y clientes usan siempre la semilla 42 (`SEMILLA`), con IDs `uuid5`
   determinísticos; nunca `uuid4`, porque cambiaría los `id_tecnico` en cada reinicio y dejaría
-  huérfanos los registros de `kpi_valor`. Las OTs y el historial usan una semilla nueva en cada
-  reset (`fuente.semilla`; `GET /api/reset?semilla=N` la fija). Las fechas son relativas a hoy.
-  Consecuencia: tras un reset, una fila ya guardada en `asignacion` con `OT-0001` apunta a otra OT.
+  huérfanos los registros de `kpi_valor`. Las OTs y el historial arrancan siempre con `SEMILLA_INICIAL`
+  (2026), así que son los mismos en cada reinicio de la API y coinciden con lo guardado en `asignacion`.
+  El id de una OT sale de su fecha (`generadores.numero_ot`), no del orden de generación, y cada fecha usa
+  su propio azar: arrancar otro día no cambia las fechas en común. El día anómalo está fijo en el calendario
+  (`historial._es_dia_anomalo`). `GET /api/reset` sin semilla sortea otra (`fuente.semilla`) y, con
+  `?semilla=N`, la fija; `?semilla=2026` vuelve a los datos del arranque. Con otra semilla, una fila ya
+  guardada en `asignacion` con un `OT-xxxx` apunta a otra OT. Mantener esta estabilidad al tocar los
+  generadores: no usar `random` global ni numeración secuencial entre días.
 - Hay 13 técnicos, 8 clientes internos (sin endpoint, solo alimentan `clienteId` y los datos de
   contacto de cada OT), 90 OTs de hoy en adelante (18 por día durante 5 días) y el historial de 30
   días (OT-0091 en adelante, con volumen distinto según el día de la semana).
@@ -162,6 +167,8 @@ equipo) en el documento de parámetros.
 - `finalizada` y `parcial` tienen 1 documento de inicio y 1 comprobante; `parcial` cubre solo parte de
   los dispositivos. Los dispositivos solo existen como patentes dentro del comprobante.
 - `lat` y `lng` del check-in se sortean alrededor del centro de la región, no de la dirección de la OT.
-- El historial se regenera en cada reset y no toca la BD. La historia de `asignacion` se inserta solo
-  con `POST /api/asignaciones/cargar-historial`.
+- El historial se regenera en memoria al arrancar y en cada reset, y no toca la BD. La historia de
+  `asignacion` se inserta solo con `POST /api/asignaciones/cargar-historial`, que omite las filas ya
+  guardadas. Lo que se pierde al reiniciar son los cambios de estado de las OTs en memoria (PATCH y POST);
+  las filas de `asignacion` quedan.
 - El frontend filtra `?estado=porAsignar`, así que no ve el historial.

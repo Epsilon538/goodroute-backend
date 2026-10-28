@@ -151,14 +151,14 @@ def root():
 def reset(
     semilla: Optional[int] = Query(
         default=None,
-        description="Semilla de las OTs y el historial. Sin ella se sortea una nueva; la respuesta la informa.",
+        description="Semilla de las OTs y el historial. Sin ella se sortea una nueva; la respuesta la informa. 2026 es la del arranque.",
     ),
 ):
     """Regenera en memoria técnicos, clientes, OTs e historial.
 
-    Los técnicos y clientes salen siempre iguales; las OTs cambian en cada reset
-    (con la misma `semilla` y el mismo día se repiten). Las filas ya guardadas en la BD
-    no se tocan, y sus ids de OT pasan a corresponder a las OTs nuevas.
+    Los técnicos y clientes salen siempre iguales. Sin `semilla` las OTs son otras; con la misma `semilla` se
+    repiten. La API arranca con la semilla 2026: `semilla=2026` vuelve a los datos del arranque, que son los
+    que coinciden con lo cargado en la BD. Las filas ya guardadas en la BD no se tocan.
     """
     fuente.reiniciar(semilla)
     return {
@@ -332,20 +332,19 @@ def get_asignaciones(
     tags=["Asignaciones"],
     summary="Insertar el historial de asignaciones en la BD",
 )
-def cargar_historial_asignaciones(
-    forzar: bool = Query(default=False, description="Insertar de nuevo aunque este historial ya se haya cargado"),
-):
-    """Inserta en `asignacion` las filas de `GET /api/asignaciones`.
+def cargar_historial_asignaciones():
+    """Inserta en `asignacion` las filas de `GET /api/asignaciones` que aún no estén.
 
-    La tabla solo crece: cada carga agrega filas. Por eso, sin `forzar`, se rechaza una segunda
-    carga del mismo historial (el reset genera uno nuevo).
+    Se puede llamar las veces que haga falta: una fila que ya existe (misma OT, técnicos, motivo y fecha de
+    asignación) se omite. Como la API arranca siempre con la misma semilla, el historial es el mismo tras un
+    reinicio y una nueva carga no duplica nada. Tras un `reset` con otra semilla, el historial es distinto y
+    sus filas se agregan aparte.
     """
-    if fuente.historial_cargado_en_bd and not forzar:
-        raise HTTPException(409, "Este historial ya se cargó en la BD. Use forzar=true para insertarlo de nuevo.")
-    error = _guardar(fuente.asignaciones)
-    if error is None:
-        fuente.historial_cargado_en_bd = True
-    return {"insertados": 0 if error else len(fuente.asignaciones), "error": error}
+    try:
+        insertados = db.insertar_asignaciones_nuevas(fuente.asignaciones)
+    except Exception as e:
+        return {"insertados": 0, "ya_existian": 0, "error": str(e)}
+    return {"insertados": insertados, "ya_existian": len(fuente.asignaciones) - insertados, "error": None}
 
 
 # --- Asignación ---

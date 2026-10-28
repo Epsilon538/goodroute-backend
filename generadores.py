@@ -25,6 +25,14 @@ ZONA_CHILE = ZoneInfo("America/Santiago")
 HORA_PRIMERA_OT = 8
 HORA_ULTIMA_OT = 19
 
+# Semilla con la que arranca la API. Con ella las OTs y el historial son siempre los mismos al reiniciar,
+# y coinciden con lo que ya se guardó en la BD. `/api/reset` sin semilla sortea una distinta.
+SEMILLA_INICIAL = 2026
+
+# El id de cada OT sale de su fecha, no del orden de generación: así no cambia con el día en que arranca la API.
+FECHA_BASE_IDS = date(2026, 1, 1)
+OTS_MAX_POR_DIA = 40
+
 # (región, OTs por día)
 ORDENES_POR_REGION = [
     ("Valparaíso", 8),
@@ -43,6 +51,12 @@ fake = Faker("es_CL")
 def fijar_semillas(semilla: int = SEMILLA) -> None:
     random.seed(semilla)
     Faker.seed(semilla)
+
+
+def numero_ot(fecha: date, indice_del_dia: int) -> int:
+    """Número de OT estable: depende solo de la fecha y de la posición de la OT dentro del día (desde 0)."""
+    assert 0 <= indice_del_dia < OTS_MAX_POR_DIA, "demasiadas OTs en un día"
+    return (fecha - FECHA_BASE_IDS).days * OTS_MAX_POR_DIA + indice_del_dia + 1
 
 
 def azar_de(semilla: int, *partes) -> random.Random:

@@ -29,15 +29,15 @@ Devuelve `mensaje`, `version`, `docs` y `endpoints_disponibles`.
 
 ### `GET /api/reset`
 
-Regenera en memoria técnicos, clientes, OTs e historial. Los técnicos y clientes salen siempre iguales (semilla 42). Las OTs y el historial cambian en cada reset.
+Regenera en memoria técnicos, clientes, OTs e historial. Los técnicos y clientes salen siempre iguales (semilla 42). Las OTs y el historial dependen de la semilla: la API arranca con la 2026, así que son las mismas en cada reinicio y coinciden con lo guardado en la BD. Un reset sin semilla genera otras.
 
 | Parámetro | Tipo | Descripción |
 | --- | --- | --- |
-| `semilla` | entero, opcional | Semilla de las OTs y el historial. Sin ella se sortea una nueva. Con la misma semilla el mismo día, se repiten |
+| `semilla` | entero, opcional | Semilla de las OTs y el historial. Sin ella se sortea una nueva. Con la misma semilla se repiten. `2026` vuelve a los datos del arranque |
 
 Respuesta: `mensaje`, `semilla`, `tecnicos`, `ordenes`, `asignaciones_historial`.
 
-Las filas que ya están en la BD no se tocan. Después de un reset, un `id_orden_trabajo` guardado antes corresponde a otra OT.
+Las filas que ya están en la BD no se tocan. Con una semilla distinta de 2026, un `id_orden_trabajo` guardado antes corresponde a otra OT.
 
 ## Backoffice simulado (`/api/v1`)
 
@@ -153,13 +153,11 @@ Cada fila trae `id_orden_trabajo`, `id_propuesta`, `id_aceptada`, `fecha_asignac
 
 ### `POST /api/asignaciones/cargar-historial`
 
-Inserta en la tabla `asignacion` las filas de `GET /api/asignaciones`. La tabla solo crece: cada carga agrega filas.
+Inserta en la tabla `asignacion` las filas de `GET /api/asignaciones` que aún no estén. No tiene parámetros.
 
-| Parámetro | Tipo | Descripción |
-| --- | --- | --- |
-| `forzar` | booleano, por defecto `false` | Inserta de nuevo aunque este historial ya se haya cargado |
+Se puede llamar las veces que haga falta: una fila que ya existe (misma OT, técnicos, motivo y fecha de asignación) se omite. Como la API arranca siempre con la misma semilla, tras un reinicio el historial es el mismo y una nueva carga no duplica nada. Tras un reset con otra semilla, el historial es distinto y sus filas se agregan aparte.
 
-Sin `forzar`, una segunda carga del mismo historial responde 409. Un reset genera un historial nuevo. Respuesta: `insertados` y `error`.
+Respuesta: `insertados`, `ya_existian` y `error`.
 
 ## KPI
 
@@ -230,4 +228,4 @@ El numerador y el denominador permiten agregar varias fechas sumando las partes,
 
 - La BD es PostgreSQL (variable `DATABASE_URL`). Sin ella la API arranca, pero los endpoints que escriben o leen `asignacion` responden con error o con `guardado_en_bd: false`.
 - La API nunca modifica el esquema de la BD. La tabla `asignacion` necesita las columnas `inicio_planificacion` (timestamp) y `kilometraje_estimado` (numeric(8,2)).
-- Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada reset o arranque.
+- Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada arranque o reset. El arranque es siempre igual (semilla 2026). Los cambios de estado de las OTs hechos por PATCH o POST se pierden al reiniciar; las filas de `asignacion` quedan.
