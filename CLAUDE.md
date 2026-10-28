@@ -34,7 +34,7 @@ Render arranca con `uvicorn main:app --host 0.0.0.0 --port $PORT`.
 - `generadores.py`: constantes y utilidades que comparten `datos.py` e `historial.py`.
 - `db.py`: conexión y escrituras en Postgres. Único archivo que inserta en `asignacion`. La API nunca
   modifica el esquema (sin ALTER ni CREATE): los cambios de la tabla los ejecuta el usuario a mano en la BD.
-- `kpis.py`: OTA, OTR y TAR (solo lectura sobre `asignacion`).
+- `kpis.py`: OTA, OTR, TAR y TPL (solo lectura sobre `asignacion`) y OTX, OTP, TPS y TTR (reciben `fuente`).
 - `modelos.py`: constantes (estados, motivos, tipos) y modelos Pydantic de los request.
 
 Los endpoints leen los datos simulados solo a través de `fuente`, nunca desde otra parte.
@@ -47,7 +47,8 @@ GET `/api/v1/ordenes?estado=&fecha=`, GET `/api/v1/ordenes/{orden_id}` (detalle 
 y `comprobantes`), PATCH `/api/v1/ordenes/{orden_id}/asignar-tecnico`.
 
 Propios de GoodRoute: POST `/api/asignar-tecnicos` (lote de una corrida del optimizador),
-GET `/api/asignaciones?fecha=` (historia de la tabla `asignacion`), POST
+GET `/api/kpis?fecha=&tecnico_id=` (los 8 KPI) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
+`/api/asignaciones?fecha=` (historia de la tabla `asignacion`), POST
 `/api/asignaciones/cargar-historial` (la inserta en la BD; sin `forzar=true` rechaza una segunda carga
 del mismo historial), GET `/api/reset?semilla=` y GET `/`.
 
@@ -59,10 +60,14 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
 
 - **`asignacion` es un log de eventos:** cada PATCH y cada OT del POST hace un INSERT nuevo, nunca
   un UPDATE.
-- **PATCH:** `id_propuesta` = técnico anterior, `id_aceptada` = técnico nuevo. `tecnico_id: null`
-  es "OT descartada" y devuelve la OT a `porAsignar`.
+- **PATCH:** toda edición por este endpoint es manual, no una propuesta del optimizador: se guarda con
+  `id_propuesta` null y `propuesta_modificada` false (así TAR la excluye), y `id_aceptada` = técnico
+  nuevo. `tecnico_id: null` es "OT descartada" y devuelve la OT a `porAsignar`. El front tampoco
+  debe mandar propuesta en estas ediciones.
 - **POST:** `id_propuesta` sale de `ruta_propuesta` de cada ruta; `id_aceptada` es el técnico de la
-  ruta. `inicio_planificacion` (top-level) y `kilometraje_estimado` (por parada: km desde donde sale
+  ruta. `propuesta_modificada` se decide por OT, no por ruta: es true solo si el técnico final difiere
+  del propuesto, o si el optimizador no había propuesto esa OT (la dispatcher la agregó a mano, con
+  `id_propuesta` null). Reordenar dentro de una ruta no cuenta. `aceptada_sin_modificacion` ya no se usa. `inicio_planificacion` (top-level) y `kilometraje_estimado` (por parada: km desde donde sale
   el técnico hasta esa OT, sin vuelta a la base) se guardan en la fila de cada OT. Las rutas son
   abiertas: `hora_retorno_base` y `distancia_total_km` son opcionales. El PATCH acepta los mismos dos
   campos. Requiere que la tabla `asignacion` tenga las columnas `inicio_planificacion timestamp` y
@@ -100,13 +105,32 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
 
 ## KPIs
 
-- `calcular_ota`, `calcular_otr` y `calcular_tar` filtran por `fecha_orden_de_trabajo::date`, sin
-  filtro por técnico (una OT reasignada cuenta una vez). OTR y TAR devuelven `numerador` y
-  `denominador` por separado, para agregar sumando partes y no promediando porcentajes.
-- No están expuestos por endpoint ni escriben en `kpi_valor`; eso lo hace otro servicio.
-- **Posible sesgo en TAR (pendiente de decidir):** el denominador incluye las asignaciones por PATCH
-  sin motivo, cuyo `id_propuesta` es el técnico anterior (o NULL en una primera asignación) y no la
-  propuesta del optimizador. No modificar sin confirmarlo con el dueño del proyecto.
+Definiciones del catálogo (documento *Estado de KPIs* del PO, HU-24). Todos reciben la fecha
+(`YYYY-MM-DD`). Se exponen por `GET /api/kpis` y `GET /api/kpis/{sigla}` (`kpis.calcular` normaliza el
+resultado en `numerador`, `denominador` y `valor`; TAR sale en %, los promedios en minutos); no escriben en
+`kpi_valor`, eso lo hace otro servicio. Si la BD falla, esos endpoints responden 503 (uno) o listan el
+KPI en `errores` y devuelven los demás (todos).
+Los de conteo devuelven un entero; TAR, TPL, TPS y TTR devuelven `numerador` y `denominador`, para
+agregar entre fechas sumando las partes (en TPL, TPS y TTR el numerador son minutos). `tecnico_id` es
+opcional en todos salvo TPL y OTP.
+
+- **De asignación (SQL sobre `asignacion`, por `fecha_orden_de_trabajo::date`):**
+  - `calcular_ota`: filas sin `motivo_reprogramacion` y con técnico aceptado (asignaciones iniciales).
+  - `calcular_otr`: filas con `motivo_reprogramacion`. OTA y OTR son excluyentes por fila.
+  - `calcular_tar`: propuestas del optimizador que la dispatcher no modificó (`id_propuesta` no nulo y
+    `propuesta_modificada = false`) sobre las propuestas del optimizador (filas con `id_propuesta` o
+    con `propuesta_modificada = true`). Las ediciones manuales (`id_propuesta` null y flag false) no cuentan.
+  - `calcular_tpl`: minutos entre `inicio_planificacion` y `fecha_asignacion` (promedio), confirmado con el PO.
+- **De ejecución (`calcular_x(fecha, fuente)`, por `fechaProgramada`):**
+  - `calcular_otx`: OTs `finalizada` (`parcial` no cuenta).
+  - `calcular_otp`: complemento de OTX: OTs del día que al terminar el día en hora de Chile no estaban
+    `finalizada` (el cierre se reconstruye con la fecha del comprobante).
+  - `calcular_tps`: documento de inicio a comprobante de cada OT que tiene ambos (también `parcial`).
+  - `calcular_ttr`: comprobante de una OT a documento de inicio de la siguiente del mismo técnico en el
+    día. Incluye la espera hasta la hora agendada (definición pendiente del PO).
+- **Pendiente:** OTA está por confirmar con la dispatcher. Las filas guardadas antes de este cambio de
+  TAR (PATCH con `id_propuesta` del técnico anterior y reprogramaciones con `true`) se cuentan mal;
+  hay que limpiarlas o ignorarlas.
 
 ## Tests
 
@@ -122,8 +146,9 @@ mayúsculas al inicio de `historial.py`; cada uno se documenta con su origen (cl
 equipo) en el documento de parámetros.
 
 - **Orden de generación (por día):** el optimizador propone un técnico, la dispatcher lo acepta o lo
-  cambia (`propuesta_modificada`), a veces reprograma (segunda fila con `motivo_reprogramacion`) y
-  recién entonces el técnico atiende. Cada OT tiene su fila de `asignacion` con `inicio_planificacion`,
+  cambia (`propuesta_modificada`), a veces reprograma (segunda fila manual, con `motivo_reprogramacion`,
+  `id_propuesta` null y `propuesta_modificada` false, que no cuenta para TAR) y recién entonces el
+  técnico atiende. Cada OT tiene su fila de `asignacion` con `inicio_planificacion`,
   `fecha_generacion`, `fecha_asignacion` y `kilometraje_estimado`; el técnico de la OT es el
   `id_aceptada` de su última fila. Un día laboral (el más reciente con 8+ días de antigüedad) es
   anómalo: más modificaciones, reprogramaciones y revisión lenta.

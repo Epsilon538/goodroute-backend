@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 
 import db
+import kpis
 from datos import fuente
 from generadores import ahora_utc
 from modelos import (
@@ -48,6 +49,11 @@ def _validar_fecha(fecha: str) -> None:
                 "Use el formato YYYY-MM-DD (ej: 2026-10-05)."
             ),
         )
+
+
+def _validar_tecnico(tecnico_id: Optional[str]) -> None:
+    if tecnico_id is not None and fuente.buscar_tecnico(tecnico_id) is None:
+        raise HTTPException(404, f"Tecnico con id '{tecnico_id}' no encontrado.")
 
 
 def _fecha_hora_ot(orden: dict) -> str:
@@ -108,6 +114,8 @@ def root():
             "GET  /api/v1/ordenes/{id}",
             "PATCH /api/v1/ordenes/{id}/asignar-tecnico",
             "POST /api/asignar-tecnicos",
+            "GET  /api/kpis?fecha=&tecnico_id=",
+            "GET  /api/kpis/{sigla}?fecha=&tecnico_id=",
             "GET  /api/asignaciones?fecha=",
             "POST /api/asignaciones/cargar-historial",
             "GET  /api/reset?semilla=",
@@ -186,6 +194,55 @@ def get_orden(orden_id: str):
     }
 
 
+@router.get("/api/kpis", tags=["KPIs"], summary="Todos los KPI del catálogo para una fecha")
+def get_kpis(
+    fecha: str = Query(description="Fecha programada de las OTs (YYYY-MM-DD)", examples=["2026-10-20"]),
+    tecnico_id: Optional[str] = Query(default=None, description="Calcula solo sobre este técnico"),
+):
+    """Devuelve OTA, OTR, OTX, OTP, TTR, TPS, TAR y TPL.
+
+    Cada KPI trae `numerador`, `denominador` y `valor`. Si falla el cálculo de alguno (por ejemplo, sin
+    conexión a la BD), aparece en `errores` y los demás se devuelven igual. Con `tecnico_id`, TPL y OTP
+    no se calculan (no existen por técnico) y se listan en `no_calculados_por_tecnico`.
+    """
+    _validar_fecha(fecha)
+    _validar_tecnico(tecnico_id)
+    resultados, errores, omitidos = [], [], []
+    for sigla, datos in kpis.CATALOGO.items():
+        if tecnico_id and not datos["por_tecnico"]:
+            omitidos.append(sigla)
+            continue
+        try:
+            resultados.append(kpis.calcular(sigla, fecha, fuente, tecnico_id))
+        except Exception as e:
+            errores.append({"sigla": sigla, "error": str(e)})
+    return {
+        "fecha": fecha,
+        "tecnico_id": tecnico_id,
+        "kpis": resultados,
+        "errores": errores,
+        "no_calculados_por_tecnico": omitidos,
+    }
+
+
+@router.get("/api/kpis/{sigla}", tags=["KPIs"], summary="Un KPI del catálogo para una fecha")
+def get_kpi(
+    sigla: str,
+    fecha: str = Query(description="Fecha programada de las OTs (YYYY-MM-DD)", examples=["2026-10-20"]),
+    tecnico_id: Optional[str] = Query(default=None, description="Calcula solo sobre este técnico"),
+):
+    """`sigla` es una de OTA, OTR, OTX, OTP, TTR, TPS, TAR o TPL. Devuelve `numerador`, `denominador` y `valor`."""
+    _validar_valor("KPI", sigla, list(kpis.CATALOGO))
+    _validar_fecha(fecha)
+    _validar_tecnico(tecnico_id)
+    if tecnico_id and not kpis.CATALOGO[sigla]["por_tecnico"]:
+        raise HTTPException(422, f"{sigla} no se calcula por técnico.")
+    try:
+        return kpis.calcular(sigla, fecha, fuente, tecnico_id)
+    except Exception as e:
+        raise HTTPException(503, f"No se pudo calcular {sigla}: {e}")
+
+
 @router.get("/api/asignaciones", tags=["Asignaciones"], summary="Historia de la tabla de asignaciones (HU-11)")
 def get_asignaciones(
     fecha: Optional[str] = Query(
@@ -240,6 +297,9 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
     - **Asignar**: `tecnico_id` sin `motivo_reprogramacion`.
     - **Reprogramar**: `tecnico_id` nuevo con `motivo_reprogramacion`.
     - **Descartar**: `tecnico_id` null; la OT vuelve a `porAsignar`.
+
+    Toda edición por este endpoint es manual, no una propuesta del optimizador: la fila se guarda con
+    `id_propuesta` null y `propuesta_modificada` false, y por eso no cuenta para TAR.
     """
     orden = fuente.buscar_orden(orden_id)
     if orden is None:
@@ -256,19 +316,18 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
     except ValueError as e:
         raise HTTPException(422, str(e))
 
-    tecnico_anterior = orden["tecnicoId"]
     _asignar_en_memoria(orden, body.tecnico_id)
 
     error = _guardar([{
         "id_orden_trabajo": orden_id,
-        "id_propuesta": tecnico_anterior,
+        "id_propuesta": None,
         "id_aceptada": body.tecnico_id,
         "fecha_asignacion": None,
         "fecha_orden_de_trabajo": fecha_ot,
         "motivo_reprogramacion": body.motivo_reprogramacion,
         "usuario_dispatcher": body.revisado_por.nombre if body.revisado_por else None,
         "fecha_generacion": None,
-        "propuesta_modificada": body.motivo_reprogramacion is not None,
+        "propuesta_modificada": False,
         "tipo_modificacion": body.tipo_modificacion,
         "inicio_planificacion": body.inicio_planificacion,
         "kilometraje_estimado": body.kilometraje_estimado,
@@ -287,6 +346,10 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
 )
 def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
     """Aplica la `ruta_final` de cada técnico y guarda un registro por OT.
+
+    `propuesta_modificada` se decide por OT: es true si su técnico final difiere del que propuso el
+    optimizador (o si el optimizador no la había propuesto). Cambiar el orden dentro de una ruta no
+    cuenta; queda registrado en `tipo_modificacion`.
 
     Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.
     """
@@ -322,18 +385,19 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 errores.append({"ot_id": ot_id, "error": str(e)})
                 continue
 
+            propuesto = propuesta_por_ot.get(ot_id)
             _asignar_en_memoria(orden, ruta.tecnico_id)
             actualizadas.append({"ot_id": ot_id, "tecnico_id": ruta.tecnico_id, "estado": orden["estado"]})
             registros.append({
                 "id_orden_trabajo": ot_id,
-                "id_propuesta": propuesta_por_ot.get(ot_id),
+                "id_propuesta": propuesto,
                 "id_aceptada": ruta.tecnico_id,
                 "fecha_asignacion": body.revisado_en,
                 "fecha_orden_de_trabajo": fecha_ot,
                 "motivo_reprogramacion": None,
                 "usuario_dispatcher": body.revisado_por.nombre,
                 "fecha_generacion": body.generado_en,
-                "propuesta_modificada": not ruta.aceptada_sin_modificacion,
+                "propuesta_modificada": propuesto != ruta.tecnico_id,
                 "tipo_modificacion": tipo_modificacion,
                 "inicio_planificacion": body.inicio_planificacion,
                 "kilometraje_estimado": km_por_ot.get(ot_id),

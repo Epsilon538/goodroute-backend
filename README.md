@@ -17,7 +17,7 @@ del modelo de datos del backoffice v3.0, a la espera de conectar el sistema exte
 | `historial.py` | Historial de 30 días: OTs ejecutadas con documento de inicio, comprobantes y asignaciones |
 | `generadores.py` | Constantes y utilidades compartidas por los generadores |
 | `db.py` | Conexión a Postgres e inserción en `asignacion` |
-| `kpis.py` | Cálculo de OTA, OTR y TAR |
+| `kpis.py` | Cálculo de OTA, OTR, TAR y TPL (SQL sobre `asignacion`) y de TPS, TTR, OTX y OTP (sobre los datos de ejecución) |
 | `modelos.py` | Constantes (estados, motivos) y modelos de request |
 | `direcciones_reales_chile.json` | Direcciones usadas para generar las OTs |
 

@@ -240,7 +240,7 @@ def _asignaciones(visita: dict, tiempos: tuple, azar) -> list[dict]:
         motivos = MOTIVOS_ANOMALIA if anomalo else MOTIVOS_REPROGRAMACION
         filas.append({
             "id_orden_trabajo": orden["id"],
-            "id_propuesta": visita["aceptado"]["id"],
+            "id_propuesta": None,  # edición manual: ya no es una propuesta del optimizador
             "id_aceptada": final["id"],
             "fecha_asignacion": iso_utc(tarde),
             "fecha_orden_de_trabajo": fecha_ot,
@@ -248,7 +248,7 @@ def _asignaciones(visita: dict, tiempos: tuple, azar) -> list[dict]:
             "usuario_dispatcher": dispatcher,
             "fecha_generacion": iso_utc(tarde),
             "inicio_planificacion": None,
-            "propuesta_modificada": True,
+            "propuesta_modificada": False,
             "tipo_modificacion": TIPO_MODIFICACION,
             "kilometraje_estimado": km_visita,
         })
