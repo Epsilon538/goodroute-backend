@@ -131,7 +131,7 @@ Cómo se guarda cada fila de `asignacion`:
 - `id_propuesta` sale de `ruta_propuesta` de la ruta donde estaba la OT, o `NULL` si el optimizador no la había propuesto.
 - `id_aceptada` es el técnico de la ruta final.
 - `propuesta_modificada` se decide por OT: es `true` solo si el técnico final difiere del propuesto, o si el optimizador no había propuesto esa OT. Reordenar dentro de una ruta no cuenta. El campo `aceptada_sin_modificacion` ya no influye en el flag.
-- `tipo_modificacion` es el JSON de `modificaciones` truncado a 100 caracteres.
+- `tipo_modificacion` guarda, por OT, el tipo de las modificaciones de `modificaciones` que la afectan (por ejemplo `ot_agregada`), sin repetir y separados por coma. Es `NULL` si ninguna la afecta. Las modificaciones que no nombran ninguna OT se aplican a todas las OTs de esa ruta.
 - `inicio_planificacion` y `kilometraje_estimado` (el de la parada de esa OT) van en cada fila.
 
 Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.

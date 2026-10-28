@@ -72,7 +72,7 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
   abiertas: `hora_retorno_base` y `distancia_total_km` son opcionales. El PATCH acepta los mismos dos
   campos. Requiere que la tabla `asignacion` tenga las columnas `inicio_planificacion timestamp` y
   `kilometraje_estimado numeric(8,2)`. Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.
-  `tipo_modificacion` es el JSON de `modificaciones` truncado a 100 caracteres.
+  `tipo_modificacion` guarda por OT el tipo de las modificaciones que la afectan (ej. `ot_agregada`), no el JSON de la ruta.
 - Asignar un técnico mueve la OT de `porRevisar`, `porAsignar` o `enviadaPlanificacion` a
   `asignacionPorConfirmar` (`modelos.ESTADOS_ASIGNABLES`) y actualiza `updatedAt`.
 - **`fechaProgramada` es texto libre en el sistema externo.** Al registrar una asignación se exige

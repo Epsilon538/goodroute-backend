@@ -1,4 +1,3 @@
-import json
 import re
 from datetime import date
 from typing import Optional
@@ -86,6 +85,30 @@ def _asignar_en_memoria(orden: dict, tecnico_id: Optional[str]) -> None:
     elif orden["estado"] in ESTADOS_ASIGNABLES:
         orden["estado"] = ESTADO_ASIGNACION_POR_CONFIRMAR
     orden["updatedAt"] = ahora_utc()
+
+
+def _tipo_modificacion_de_ot(modificaciones: list[dict], ot_id: str) -> Optional[str]:
+    """Resume, como texto corto, las modificaciones de la dispatcher que afectan a una OT.
+
+    El optimizador manda las modificaciones por ruta (cada una dice a qué OT se refiere). A cada OT
+    le corresponden las suyas y las que no nombran ninguna OT (cambios de la ruta completa).
+    Devuelve los tipos sin repetir, separados por coma (p. ej. "ot_agregada"), o None si no hay.
+    """
+    tipos: list[str] = []
+    for mod in modificaciones:
+        if not isinstance(mod, dict):
+            continue
+        ots_mencionadas = {
+            v for v in mod.values() if isinstance(v, str) and v.startswith("OT-")
+        } | {x for v in mod.values() if isinstance(v, list) for x in v if isinstance(x, str)}
+        if ots_mencionadas and ot_id not in ots_mencionadas:
+            continue
+        tipo = mod.get("tipo")
+        if isinstance(tipo, str) and tipo not in tipos:
+            tipos.append(tipo)
+    if not tipos:
+        return None
+    return ", ".join(tipos)[:LARGO_MAX_TIPO_MODIFICACION]
 
 
 def _guardar(registros: list[dict]) -> Optional[str]:
@@ -349,7 +372,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
 
     `propuesta_modificada` se decide por OT: es true si su técnico final difiere del que propuso el
     optimizador (o si el optimizador no la había propuesto). Cambiar el orden dentro de una ruta no
-    cuenta; queda registrado en `tipo_modificacion`.
+    cuenta. `tipo_modificacion` guarda, por OT, el tipo de las modificaciones que la afectan.
 
     Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.
     """
@@ -366,12 +389,6 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 for ot_id in ruta.ruta_final
             ]
             continue
-
-        tipo_modificacion = (
-            json.dumps(ruta.modificaciones, ensure_ascii=False)[:LARGO_MAX_TIPO_MODIFICACION]
-            if ruta.modificaciones
-            else None
-        )
 
         for ot_id in ruta.ruta_final:
             orden = fuente.buscar_orden(ot_id)
@@ -398,7 +415,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 "usuario_dispatcher": body.revisado_por.nombre,
                 "fecha_generacion": body.generado_en,
                 "propuesta_modificada": propuesto != ruta.tecnico_id,
-                "tipo_modificacion": tipo_modificacion,
+                "tipo_modificacion": _tipo_modificacion_de_ot(ruta.modificaciones, ot_id),
                 "inicio_planificacion": body.inicio_planificacion,
                 "kilometraje_estimado": km_por_ot.get(ot_id),
             })
