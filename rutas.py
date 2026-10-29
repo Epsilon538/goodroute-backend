@@ -265,6 +265,9 @@ def get_kpis_rango(
     hay una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` null). Con `por_tecnico=true` se
     suman las filas de cada técnico (solo los KPI que se calculan por técnico, o sea sin TPL ni OTP). Con
     `tecnico_id` solo vienen las de ese técnico. No se puede pasar `por_tecnico` y `tecnico_id` juntos.
+    `totales` trae el total de todo el período, ya calculado: un elemento por KPI (y por técnico si se pidió
+    el desglose), con `numerador`, `denominador` y `valor` sumando todas las fechas y recién entonces
+    dividiendo. El front lo muestra tal cual, sin sumar ni dividir por su cuenta.
     Lo que falte en `kpi_valor` se calcula en el momento y, si ya no puede cambiar, se guarda. Si falla la BD, los KPI de
     asignación (OTA, OTR, TAR, TPL) quedan en `errores` y el resto se devuelve igual.
     """
@@ -285,6 +288,7 @@ def get_kpis_rango(
         "por_tecnico": por_tecnico,
         "tecnico_id": tecnico_id,
         "kpis": resultados,
+        "totales": kpis.totalizar(resultados),
         "errores": errores,
     }
 

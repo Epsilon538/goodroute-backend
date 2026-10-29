@@ -127,6 +127,7 @@ en una sola transacción (no necesita índice único) y repetirlo no duplica. Si
 calculan al vuelo. Requisitos de BD (los pone el usuario, la API no hace DDL): `kpi.sigla` con las 10 siglas
 (la FK de `kpi_valor.kpi_sigla`) y `valor` y `denominador` aceptando NULL (los conteos no tienen denominador y
 `valor` es NULL sin datos). Si se edita `asignacion` a mano, reiniciar la API refresca `kpi_valor`.
+`GET /api/kpis/rango` también devuelve `totales` (`kpis.totalizar`): el total del período por KPI y técnico, sumando numeradores y denominadores y recién ahí dividiendo, para que el front no calcule nada.
 Los de conteo devuelven un entero; TAR, TPL, TPS, TTR, CVH y UJO devuelven `numerador` y `denominador`, para
 agregar entre fechas sumando las partes (en TPL, TPS y TTR el numerador son minutos). `tecnico_id` es
 opcional en todos salvo TPL y OTP (CVH y UJO sí).

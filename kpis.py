@@ -429,3 +429,35 @@ def calcular_rango(
                     crudo = _crudo(sigla, fecha, fuente, tecnico)
                 resultados.append(_normalizar(sigla, fecha, tecnico, crudo))
     return resultados, errores
+
+
+def totalizar(filas: list[dict]) -> list[dict]:
+    """Totales del período: un resultado por KPI (y por técnico) a partir de las filas diarias.
+
+    Suma numeradores y denominadores de todas las fechas y recién entonces calcula `valor`, igual que
+    `_normalizar` (nunca promedia los `valor` diarios). Cada total lleva `sigla`, `nombre`, `unidad`,
+    `tecnico_id`, `dias` (fechas sumadas), `numerador`, `denominador` y `valor`. El global (`tecnico_id`
+    null) va primero y luego cada técnico, con los KPI en el orden del catálogo.
+    """
+    orden_sigla = {sigla: i for i, sigla in enumerate(CATALOGO)}
+    orden_tecnico: dict[Optional[str], int] = {None: -1}
+    sumas: dict[tuple, dict] = {}
+    for fila in filas:
+        tecnico = fila["tecnico_id"]
+        orden_tecnico.setdefault(tecnico, len(orden_tecnico))
+        suma = sumas.setdefault((tecnico, fila["sigla"]), {"numerador": 0, "denominador": 0, "dias": 0})
+        suma["numerador"] += fila["numerador"]
+        suma["denominador"] += fila["denominador"] or 0
+        suma["dias"] += 1
+
+    totales = []
+    for (tecnico, sigla), suma in sorted(sumas.items(), key=lambda x: (orden_tecnico[x[0][0]], orden_sigla[x[0][1]])):
+        if CATALOGO[sigla]["tipo"] == "conteo":
+            crudo = int(suma["numerador"])
+        else:
+            crudo = {"numerador": round(suma["numerador"], 2), "denominador": round(suma["denominador"], 2)}
+        total = _normalizar(sigla, "", tecnico, crudo)
+        del total["fecha"]
+        total["dias"] = suma["dias"]
+        totales.append(total)
+    return totales

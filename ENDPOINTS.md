@@ -208,12 +208,14 @@ Los KPI de todas las fechas de un rango en una sola llamada. Los de asignación 
 | `por_tecnico` | booleano, por defecto `false` | Agrega las filas de cada técnico |
 | `tecnico_id` | texto, opcional | Devuelve solo las filas de ese técnico |
 
-Respuesta: `fecha_desde`, `fecha_hasta`, `por_tecnico`, `tecnico_id`, `kpis` y `errores`. `kpis` es una lista plana y cada elemento tiene la misma forma que en `GET /api/kpis` (`sigla`, `nombre`, `unidad`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`).
+Respuesta: `fecha_desde`, `fecha_hasta`, `por_tecnico`, `tecnico_id`, `kpis`, `totales` y `errores`. `kpis` es una lista plana y cada elemento tiene la misma forma que en `GET /api/kpis` (`sigla`, `nombre`, `unidad`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`).
 
 - Sin `por_tecnico` ni `tecnico_id`: una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` es `null`).
 - Con `por_tecnico=true`: esas filas globales y, además, una por fecha, técnico y KPI que se calcule por técnico (sin TPL ni OTP: CVH y UJO sí se calculan por técnico).
 - Con `tecnico_id`: solo las filas de ese técnico.
-- Si falla la BD, OTA, OTR, TAR y TPL quedan en `errores` y los demás KPI se devuelven igual.
+- Si falla la BD, OTA, OTR, TAR y TPL quedan en `errores` y los demás KPI se devuelven igual (y `totales` trae solo los demás).
+
+`totales` es el total de todo el período, ya calculado por la API: un elemento por KPI (y por técnico, con el mismo criterio que `kpis`), con `sigla`, `nombre`, `unidad`, `tecnico_id`, `dias` (fechas sumadas), `numerador`, `denominador` y `valor`. Suma los numeradores y los denominadores de todas las fechas y recién después calcula `valor`, así que no es el promedio de los valores diarios. En los conteos `denominador` es `null` y `valor` es el numerador. `valor` es `null` si el denominador es 0. El global va primero y luego cada técnico, con los KPI en el orden del catálogo. El cliente muestra estos totales tal cual y usa `kpis` solo para las series diarias.
 
 Errores: 422 si una fecha es inválida, si `fecha_desde` es posterior a `fecha_hasta`, si el rango pasa de 93 días o si se pasan `por_tecnico` y `tecnico_id` juntos; 404 si el técnico no existe.
 
