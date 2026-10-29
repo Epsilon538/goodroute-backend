@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 import db
 import kpis
+import precalculo
 from datos import fuente
 from generadores import ahora_utc
 from modelos import (
@@ -123,6 +124,11 @@ def _guardar(registros: list[dict]) -> Optional[str]:
     return None
 
 
+def _actualizar_kpis(registros: list[dict]) -> Optional[str]:
+    """Recalcula en `kpi_valor` los KPI de asignación de las fechas de esas filas. Devuelve el error, o None."""
+    return precalculo.actualizar_asignacion([r["fecha_orden_de_trabajo"][:10] for r in registros], fuente)
+
+
 # --- Raíz y admin ---
 
 @router.get("/", tags=["Root"])
@@ -223,23 +229,16 @@ def get_kpis(
     fecha: str = Query(description="Fecha programada de las OTs (YYYY-MM-DD)", examples=["2026-10-20"]),
     tecnico_id: Optional[str] = Query(default=None, description="Calcula solo sobre este técnico"),
 ):
-    """Devuelve OTA, OTR, OTX, OTP, TTR, TPS, TAR, TPL, CVH y UJO.
+    """Devuelve OTA, OTR, OTX, OTP, TTR, TPS, TAR, TPL, CVH y UJO, leídos de `kpi_valor`.
 
-    Cada KPI trae `numerador`, `denominador` y `valor`. Si falla el cálculo de alguno (por ejemplo, sin
-    conexión a la BD), aparece en `errores` y los demás se devuelven igual. Con `tecnico_id`, TPL y OTP
-    no se calculan (no existen por técnico) y se listan en `no_calculados_por_tecnico`.
+    Cada KPI trae `numerador`, `denominador` y `valor`. Lo que falte en `kpi_valor` se calcula en el momento. Si falla
+    el cálculo de alguno (por ejemplo, sin conexión a la BD), aparece en `errores` y los demás se devuelven igual. Con
+    `tecnico_id`, TPL y OTP no se calculan (no existen por técnico) y se listan en `no_calculados_por_tecnico`.
     """
     _validar_fecha(fecha)
     _validar_tecnico(tecnico_id)
-    resultados, errores, omitidos = [], [], []
-    for sigla, datos in kpis.CATALOGO.items():
-        if tecnico_id and not datos["por_tecnico"]:
-            omitidos.append(sigla)
-            continue
-        try:
-            resultados.append(kpis.calcular(sigla, fecha, fuente, tecnico_id))
-        except Exception as e:
-            errores.append({"sigla": sigla, "error": str(e)})
+    omitidos = [s for s, d in kpis.CATALOGO.items() if tecnico_id and not d["por_tecnico"]]
+    resultados, errores = precalculo.obtener_rango(fecha, fecha, fuente, tecnico_id)
     return {
         "fecha": fecha,
         "tecnico_id": tecnico_id,
@@ -259,14 +258,15 @@ def get_kpis_rango(
     por_tecnico: bool = Query(default=False, description="Agrega el desglose de todos los técnicos"),
     tecnico_id: Optional[str] = Query(default=None, description="Devuelve solo las filas de este técnico"),
 ):
-    """Devuelve los KPI de cada fecha del rango en una sola llamada (máximo 93 días).
+    """Devuelve los KPI de cada fecha del rango en una sola llamada (máximo 93 días), leídos de `kpi_valor`.
 
     `kpis` es una lista plana; cada elemento tiene la misma forma que en `GET /api/kpis`
     (`sigla`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`...). Sin `por_tecnico` ni `tecnico_id`
     hay una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` null). Con `por_tecnico=true` se
     suman las filas de cada técnico (solo los KPI que se calculan por técnico, o sea sin TPL ni OTP). Con
     `tecnico_id` solo vienen las de ese técnico. No se puede pasar `por_tecnico` y `tecnico_id` juntos.
-    Si falla la BD, los KPI de asignación (OTA, OTR, TAR, TPL) quedan en `errores` y el resto se devuelve igual.
+    Lo que falte en `kpi_valor` se calcula en el momento y, si ya no puede cambiar, se guarda. Si falla la BD, los KPI de
+    asignación (OTA, OTR, TAR, TPL) quedan en `errores` y el resto se devuelve igual.
     """
     _validar_fecha(fecha_desde)
     _validar_fecha(fecha_hasta)
@@ -278,7 +278,7 @@ def get_kpis_rango(
     if por_tecnico and tecnico_id:
         raise HTTPException(422, "Use 'por_tecnico' o 'tecnico_id', no ambos.")
     _validar_tecnico(tecnico_id)
-    resultados, errores = kpis.calcular_rango(fecha_desde, fecha_hasta, fuente, tecnico_id, por_tecnico)
+    resultados, errores = precalculo.obtener_rango(fecha_desde, fecha_hasta, fuente, tecnico_id, por_tecnico)
     return {
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
@@ -301,10 +301,11 @@ def get_kpi(
     _validar_tecnico(tecnico_id)
     if tecnico_id and not kpis.CATALOGO[sigla]["por_tecnico"]:
         raise HTTPException(422, f"{sigla} no se calcula por técnico.")
-    try:
-        return kpis.calcular(sigla, fecha, fuente, tecnico_id)
-    except Exception as e:
-        raise HTTPException(503, f"No se pudo calcular {sigla}: {e}")
+    resultados, errores = precalculo.obtener_rango(fecha, fecha, fuente, tecnico_id, siglas=[sigla])
+    if errores or not resultados:
+        detalle = errores[0]["error"] if errores else "sin resultado"
+        raise HTTPException(503, f"No se pudo calcular {sigla}: {detalle}")
+    return resultados[0]
 
 
 @router.get("/api/asignaciones", tags=["Asignaciones"], summary="Historia de la tabla de asignaciones (HU-11)")
@@ -338,13 +339,20 @@ def cargar_historial_asignaciones():
     Se puede llamar las veces que haga falta: una fila que ya existe (misma OT, técnicos, motivo y fecha de
     asignación) se omite. Como la API arranca siempre con la misma semilla, el historial es el mismo tras un
     reinicio y una nueva carga no duplica nada. Tras un `reset` con otra semilla, el historial es distinto y
-    sus filas se agregan aparte.
+    sus filas se agregan aparte. Si inserta filas nuevas, actualiza en `kpi_valor` los KPI de asignación de esas fechas.
     """
     try:
         insertados = db.insertar_asignaciones_nuevas(fuente.asignaciones)
     except Exception as e:
         return {"insertados": 0, "ya_existian": 0, "error": str(e)}
-    return {"insertados": insertados, "ya_existian": len(fuente.asignaciones) - insertados, "error": None}
+    error_kpi = _actualizar_kpis(fuente.asignaciones) if insertados else None
+    return {
+        "insertados": insertados,
+        "ya_existian": len(fuente.asignaciones) - insertados,
+        "error": None,
+        "kpis_actualizados": bool(insertados) and error_kpi is None,
+        "kpis_error": error_kpi,
+    }
 
 
 # --- Asignación ---
@@ -399,6 +407,11 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
     respuesta = {**orden, "guardado_en_bd": error is None}
     if error:
         respuesta["db_error"] = error
+    else:
+        error_kpi = _actualizar_kpis([{"fecha_orden_de_trabajo": fecha_ot}])
+        respuesta["kpis_actualizados"] = error_kpi is None
+        if error_kpi:
+            respuesta["kpis_error"] = error_kpi
     return respuesta
 
 
@@ -461,6 +474,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
             })
 
     error_bd = _guardar(registros) if registros else None
+    error_kpi = _actualizar_kpis(registros) if registros and error_bd is None else None
 
     return {
         "mensaje": "Asignacion masiva completada.",
@@ -470,5 +484,10 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
         "total_actualizadas": len(actualizadas),
         "actualizadas": actualizadas,
         "errores": errores,
-        "base_de_datos": {"insertados": 0 if error_bd else len(registros), "error": error_bd},
+        "base_de_datos": {
+            "insertados": 0 if error_bd else len(registros),
+            "error": error_bd,
+            "kpis_actualizados": bool(registros) and error_bd is None and error_kpi is None,
+            "kpis_error": error_kpi,
+        },
     }

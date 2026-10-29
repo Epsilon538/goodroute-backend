@@ -98,7 +98,7 @@ Toda edición por este endpoint es manual, no una propuesta del optimizador: la 
 
 Asignar mueve la OT de `porRevisar`, `porAsignar` o `enviadaPlanificacion` a `asignacionPorConfirmar`.
 
-Respuesta: la OT actualizada más `guardado_en_bd` (y `db_error` si falló). Un fallo de BD no tumba el request: el cambio en memoria ya se aplicó.
+Respuesta: la OT actualizada más `guardado_en_bd` (y `db_error` si falló) y `kpis_actualizados` (y `kpis_error` si no se pudo actualizar `kpi_valor`). Un fallo de BD no tumba el request: el cambio en memoria ya se aplicó.
 
 Errores: 404 si la OT o el técnico no existen, 422 si el motivo o el tipo de modificación no son válidos, o si `fechaProgramada` u `horaProgramada` de la OT no tienen el formato esperado.
 
@@ -137,7 +137,7 @@ Cómo se guarda cada fila de `asignacion`:
 
 Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.
 
-Respuesta: `mensaje`, `fecha_planificacion`, `revisado_por`, `total_recibidas`, `total_actualizadas`, `actualizadas` (lista de `ot_id`, `tecnico_id`, `estado`), `errores` (lista de `ot_id`, `error`) y `base_de_datos` (`insertados`, `error`).
+Respuesta: `mensaje`, `fecha_planificacion`, `revisado_por`, `total_recibidas`, `total_actualizadas`, `actualizadas` (lista de `ot_id`, `tecnico_id`, `estado`), `errores` (lista de `ot_id`, `error`) y `base_de_datos` (`insertados`, `error`, `kpis_actualizados`, `kpis_error`).
 
 ## Historia de asignaciones
 
@@ -157,11 +157,19 @@ Inserta en la tabla `asignacion` las filas de `GET /api/asignaciones` que aún n
 
 Se puede llamar las veces que haga falta: una fila que ya existe (misma OT, técnicos, motivo y fecha de asignación) se omite. Como la API arranca siempre con la misma semilla, tras un reinicio el historial es el mismo y una nueva carga no duplica nada. Tras un reset con otra semilla, el historial es distinto y sus filas se agregan aparte.
 
-Respuesta: `insertados`, `ya_existian` y `error`.
+Si inserta filas nuevas, actualiza en `kpi_valor` los KPI de asignación de esas fechas.
+
+Respuesta: `insertados`, `ya_existian`, `error`, `kpis_actualizados` y `kpis_error`.
 
 ## KPI
 
-Los KPI del catálogo (HU-24). No escriben en `kpi_valor`.
+Los KPI del catálogo (HU-24). Los endpoints leen de la tabla `kpi_valor`, donde hay una fila por día, KPI y técnico con `numerador`, `denominador` y `valor` (`id_tecnico` en `NULL` es la fila global). La tabla se llena sola:
+
+- Al arrancar la API, en segundo plano: los últimos 30 días de los 10 KPI.
+- Al confirmar o editar una asignación y al cargar el historial: OTA, OTR, TAR y TPL de las fechas afectadas.
+- Al consultar: lo que falte se calcula, se devuelve y se guarda.
+
+Los KPI de ejecución (OTX, OTP, TTR, TPS, CVH y UJO) de hoy y de fechas futuras no se guardan porque todavía pueden cambiar, y se calculan al momento. Si `kpi_valor` no responde, los endpoints calculan al vuelo.
 
 | Sigla | Nombre | Fuente | Qué calcula |
 | --- | --- | --- | --- |
@@ -229,5 +237,6 @@ El numerador y el denominador permiten agregar varias fechas sumando las partes,
 ## Notas de operación
 
 - La BD es PostgreSQL (variable `DATABASE_URL`). Sin ella la API arranca, pero los endpoints que escriben o leen `asignacion` responden con error o con `guardado_en_bd: false`.
+- `kpi_valor` necesita que la tabla `kpi` tenga las 10 siglas (es una clave foránea) y que `valor` y `denominador` acepten `NULL`. Si falla la escritura, las lecturas calculan al vuelo y el error se informa en `kpis_error` o queda en el log.
 - La API nunca modifica el esquema de la BD. La tabla `asignacion` necesita las columnas `inicio_planificacion` (timestamp) y `kilometraje_estimado` (numeric(8,2)).
 - Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada arranque o reset. El arranque es siempre igual (semilla 2026). Los cambios de estado de las OTs hechos por PATCH o POST se pierden al reiniciar; las filas de `asignacion` quedan.

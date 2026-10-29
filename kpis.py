@@ -378,18 +378,22 @@ def calcular_rango(
     fuente,
     tecnico_id: Optional[str] = None,
     por_tecnico: bool = False,
+    siglas: Optional[list[str]] = None,
+    fechas: Optional[list[str]] = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Calcula todos los KPI para cada fecha entre `desde` y `hasta` (inclusive).
+    """Calcula los KPI de cada fecha entre `desde` y `hasta` (inclusive), o solo de las `fechas` indicadas.
 
     Sin `tecnico_id` ni `por_tecnico`: una fila por fecha y KPI, sobre todos los técnicos.
     Con `por_tecnico`: además, una fila por fecha, técnico y KPI que se calcule por técnico.
     Con `tecnico_id`: solo las filas de ese técnico.
+    `siglas` limita los KPI (por defecto, todos).
 
     Los de asignación salen de una sola consulta SQL para todo el rango. Si esa consulta falla, sus
     KPI se reportan una vez en `errores` y los demás se devuelven igual.
     Devuelve (kpis, errores); cada KPI tiene la misma forma que `calcular`.
     """
-    fechas = fechas_entre(desde, hasta)
+    fechas = fechas if fechas is not None else fechas_entre(desde, hasta)
+    siglas = [sigla for sigla in CATALOGO if siglas is None or sigla in siglas]
     if tecnico_id:
         tecnicos = [tecnico_id]
     elif por_tecnico:
@@ -399,21 +403,22 @@ def calcular_rango(
 
     errores = []
     por_dia: Optional[dict[str, dict]] = None  # {fecha: {id_aceptada: grupo}}
-    try:
-        por_dia = {}
-        for (dia, tecnico), grupo in _asignacion_por_dia_y_tecnico(desde, hasta).items():
-            por_dia.setdefault(dia, {})[tecnico] = grupo
-    except Exception as e:
-        por_dia = None
-        errores = [{"sigla": sigla, "error": str(e)} for sigla in SIGLAS_ASIGNACION
-                   if not (tecnico_id and not CATALOGO[sigla]["por_tecnico"])]
+    if fechas and any(sigla in SIGLAS_ASIGNACION for sigla in siglas):
+        try:
+            por_dia = {}
+            for (dia, tecnico), grupo in _asignacion_por_dia_y_tecnico(min(fechas), max(fechas)).items():
+                por_dia.setdefault(dia, {})[tecnico] = grupo
+        except Exception as e:
+            por_dia = None
+            errores = [{"sigla": sigla, "error": str(e)} for sigla in siglas
+                       if sigla in SIGLAS_ASIGNACION and not (tecnico_id and not CATALOGO[sigla]["por_tecnico"])]
 
     resultados = []
     for fecha in fechas:
         grupos_del_dia = (por_dia or {}).get(fecha, {})
         for tecnico in tecnicos:
-            for sigla, datos in CATALOGO.items():
-                if tecnico and not datos["por_tecnico"]:
+            for sigla in siglas:
+                if tecnico and not CATALOGO[sigla]["por_tecnico"]:
                     continue
                 if sigla in SIGLAS_ASIGNACION:
                     if por_dia is None:

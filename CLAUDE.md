@@ -23,7 +23,7 @@ Render arranca con `uvicorn main:app --host 0.0.0.0 --port $PORT`.
 
 ## Estructura (cada archivo, una responsabilidad)
 
-- `main.py`: crea la app y CORS.
+- `main.py`: crea la app y CORS; al arrancar lanza el precálculo de KPI en un hilo (si hay `DATABASE_URL`).
 - `rutas.py`: endpoints y helpers de validación, en dos routers: `router_v1` (prefijo `/api/v1`,
   simula el backoffice) y `router` (endpoints propios de GoodRoute). No genera datos ni escribe SQL.
 - `datos.py`: técnicos, clientes y OTs simulados en memoria. `FuenteDatos` (instancia `fuente`) expone
@@ -34,6 +34,7 @@ Render arranca con `uvicorn main:app --host 0.0.0.0 --port $PORT`.
 - `generadores.py`: constantes y utilidades que comparten `datos.py` e `historial.py`.
 - `db.py`: conexión y escrituras en Postgres. Único archivo que inserta en `asignacion`. La API nunca
   modifica el esquema (sin ALTER ni CREATE): los cambios de la tabla los ejecuta el usuario a mano en la BD.
+- `precalculo.py`: guarda y lee los KPI en `kpi_valor` (ver sección KPIs).
 - `kpis.py`: OTA, OTR, TAR y TPL (solo lectura sobre `asignacion`) y OTX, OTP, TPS y TTR (reciben `fuente`).
 - `modelos.py`: constantes (estados, motivos, tipos) y modelos Pydantic de los request.
 
@@ -112,9 +113,20 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
 
 Definiciones del catálogo (documento *Estado de KPIs* del PO, HU-24). Todos reciben la fecha
 (`YYYY-MM-DD`). Se exponen por `GET /api/kpis` y `GET /api/kpis/{sigla}` (`kpis.calcular` normaliza el
-resultado en `numerador`, `denominador` y `valor`; TAR, CVH y UJO salen en %, los promedios en minutos); no escriben en
-`kpi_valor`, eso lo hace otro servicio. Si la BD falla, esos endpoints responden 503 (uno) o listan el
-KPI en `errores` y devuelven los demás (todos).
+resultado en `numerador`, `denominador` y `valor`; TAR, CVH y UJO salen en %, los promedios en minutos); Si la BD falla, esos endpoints
+responden 503 (uno) o listan el KPI en `errores` y devuelven los demás (todos).
+
+**Precálculo (`precalculo.py`).** Los endpoints leen de `kpi_valor`: una fila por día, KPI y técnico, con
+`numerador`, `denominador` y `valor` (`id_tecnico` NULL es la fila global). Para varios días se suman las filas
+y recién se divide. Se llena sin endpoint, con tres disparadores: (1) al arrancar, en un hilo, los últimos 30
+días de los 10 KPI (`precalcular_al_arrancar`; un deploy recalcula con las definiciones nuevas); (2) tras
+insertar en `asignacion` (PATCH, POST y cargar historial), OTA, OTR, TAR y TPL de las fechas afectadas
+(`actualizar_asignacion`); (3) al consultar, lo que falte se calcula, se devuelve y se guarda (`obtener_rango`).
+Los KPI de ejecución de hoy y de fechas futuras no se guardan porque pueden cambiar. Escribir es borrar e insertar
+en una sola transacción (no necesita índice único) y repetirlo no duplica. Si `kpi_valor` falla, las lecturas
+calculan al vuelo. Requisitos de BD (los pone el usuario, la API no hace DDL): `kpi.sigla` con las 10 siglas
+(la FK de `kpi_valor.kpi_sigla`) y `valor` y `denominador` aceptando NULL (los conteos no tienen denominador y
+`valor` es NULL sin datos). Si se edita `asignacion` a mano, reiniciar la API refresca `kpi_valor`.
 Los de conteo devuelven un entero; TAR, TPL, TPS, TTR, CVH y UJO devuelven `numerador` y `denominador`, para
 agregar entre fechas sumando las partes (en TPL, TPS y TTR el numerador son minutos). `tecnico_id` es
 opcional en todos salvo TPL y OTP (CVH y UJO sí).
