@@ -144,7 +144,7 @@ def root():
             "PATCH /api/v1/ordenes/{id}/asignar-tecnico",
             "POST /api/asignar-tecnicos",
             "GET  /api/kpis?fecha=&tecnico_id=",
-            "GET  /api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=",
+            "GET  /api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=&zona=",
             "GET  /api/kpis/{sigla}?fecha=&tecnico_id=",
             "GET  /api/asignaciones?fecha=",
             "POST /api/asignaciones/cargar-historial",
@@ -257,6 +257,11 @@ def get_kpis_rango(
     fecha_hasta: str = Query(description="Última fecha del rango, inclusive (YYYY-MM-DD)", examples=["2026-11-03"]),
     por_tecnico: bool = Query(default=False, description="Agrega el desglose de todos los técnicos"),
     tecnico_id: Optional[str] = Query(default=None, description="Devuelve solo las filas de este técnico"),
+    zona: Optional[str] = Query(
+        default=None,
+        description="Devuelve el total de los técnicos de esa zona (valor de `zona` en /tecnicos, sin distinguir mayúsculas)",
+        examples=["Valparaíso"],
+    ),
 ):
     """Devuelve los KPI de cada fecha del rango en una sola llamada (máximo 93 días), leídos de `kpi_valor`.
 
@@ -265,6 +270,9 @@ def get_kpis_rango(
     hay una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` null). Con `por_tecnico=true` se
     suman las filas de cada técnico (solo los KPI que se calculan por técnico, o sea sin TPL ni OTP). Con
     `tecnico_id` solo vienen las de ese técnico. No se puede pasar `por_tecnico` y `tecnico_id` juntos.
+    Con `zona`, `kpis` y `totales` son la suma de los técnicos de esa zona (`tecnico_id` null, sin TPL ni OTP,
+    que no se calculan por técnico); con `por_tecnico=true` se agregan además las filas de esos técnicos. No se
+    puede combinar con `tecnico_id`.
     `totales` trae el total de todo el período, ya calculado: un elemento por KPI (y por técnico si se pidió
     el desglose), con `numerador`, `denominador` y `valor` sumando todas las fechas y recién entonces
     dividiendo. El front lo muestra tal cual, sin sumar ni dividir por su cuenta.
@@ -281,12 +289,22 @@ def get_kpis_rango(
     if por_tecnico and tecnico_id:
         raise HTTPException(422, "Use 'por_tecnico' o 'tecnico_id', no ambos.")
     _validar_tecnico(tecnico_id)
-    resultados, errores = precalculo.obtener_rango(fecha_desde, fecha_hasta, fuente, tecnico_id, por_tecnico)
+    if zona is not None:
+        if tecnico_id:
+            raise HTTPException(422, "Use 'zona' o 'tecnico_id', no ambos.")
+        ids = [t["id"] for t in fuente.tecnicos if t["zona"].casefold() == zona.casefold()]
+        if not ids:
+            raise HTTPException(404, f"No hay técnicos en la zona '{zona}'.")
+        filas, errores = precalculo.obtener_rango(fecha_desde, fecha_hasta, fuente, por_tecnico=True)
+        resultados = kpis.agregar_zona(filas, ids, con_tecnicos=por_tecnico)
+    else:
+        resultados, errores = precalculo.obtener_rango(fecha_desde, fecha_hasta, fuente, tecnico_id, por_tecnico)
     return {
         "fecha_desde": fecha_desde,
         "fecha_hasta": fecha_hasta,
         "por_tecnico": por_tecnico,
         "tecnico_id": tecnico_id,
+        "zona": zona,
         "kpis": resultados,
         "totales": kpis.totalizar(resultados),
         "errores": errores,

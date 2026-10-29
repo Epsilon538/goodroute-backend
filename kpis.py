@@ -461,3 +461,38 @@ def totalizar(filas: list[dict]) -> list[dict]:
         total["dias"] = suma["dias"]
         totales.append(total)
     return totales
+
+
+def agregar_zona(filas: list[dict], tecnico_ids: list[str], con_tecnicos: bool = False) -> list[dict]:
+    """KPI de una zona a partir de las filas por técnico: suma numeradores y denominadores de sus técnicos.
+
+    `filas` son las filas diarias con el desglose por técnico (`calcular_rango` o `obtener_rango` con
+    `por_tecnico=True`). Devuelve, por fecha, una fila por KPI con `tecnico_id` null (el total de la zona,
+    solo los KPI que se calculan por técnico: sin TPL ni OTP) y, si `con_tecnicos`, después las filas de
+    cada técnico de la zona.
+    """
+    ids = set(tecnico_ids)
+    por_fecha: dict[str, list[dict]] = {}
+    for fila in filas:
+        if fila["tecnico_id"] in ids:
+            por_fecha.setdefault(fila["fecha"], []).append(fila)
+
+    resultados = []
+    for fecha, del_dia in por_fecha.items():
+        sumas: dict[str, list] = {}
+        for fila in del_dia:
+            suma = sumas.setdefault(fila["sigla"], [0, 0])
+            suma[0] += fila["numerador"]
+            suma[1] += fila["denominador"] or 0
+        for sigla in CATALOGO:
+            if sigla not in sumas:
+                continue
+            numerador, denominador = sumas[sigla]
+            if CATALOGO[sigla]["tipo"] == "conteo":
+                crudo = int(numerador)
+            else:
+                crudo = {"numerador": round(numerador, 2), "denominador": round(denominador, 2)}
+            resultados.append(_normalizar(sigla, fecha, None, crudo))
+        if con_tecnicos:
+            resultados.extend(del_dia)
+    return resultados
