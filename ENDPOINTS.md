@@ -17,7 +17,7 @@ Los endpoints que simulan el backoffice llevan el prefijo `/api/v1` y usan el mo
 | POST | `/api/asignar-tecnicos` | Confirma una corrida completa del optimizador |
 | GET | `/api/asignaciones` | Historia simulada de la tabla `asignacion` |
 | POST | `/api/asignaciones/cargar-historial` | Inserta esa historia en la BD |
-| GET | `/api/kpis` | Los 8 KPI de una fecha |
+| GET | `/api/kpis` | Los 10 KPI de una fecha |
 | GET | `/api/kpis/rango` | Los KPI de un rango de fechas, con desglose opcional por técnico |
 | GET | `/api/kpis/{sigla}` | Un KPI de una fecha |
 
@@ -173,12 +173,14 @@ Los KPI del catálogo (HU-24). No escriben en `kpi_valor`.
 | TPS | Tiempo Promedio de Servicio | OTs del sistema externo | Minutos entre el documento de inicio y el comprobante de cada OT |
 | TAR | Tasa de Aceptación de Rutas | `asignacion` | Propuestas del optimizador sin modificar sobre propuestas del optimizador, en % |
 | TPL | Tiempo de Planificación | `asignacion` | Minutos entre `inicio_planificacion` y `fecha_asignacion` |
+| CVH | Cumplimiento de Ventana Horaria | OTs del sistema externo | OTs cuyo documento de inicio cae dentro de su ventana (hora programada, hasta 30 min antes y hasta 15 min después) sobre las OTs que tienen documento de inicio, en % |
+| UJO | Utilización de Jornada | OTs del sistema externo | Minutos efectivos de trabajo (documento de inicio a comprobante) sobre la jornada de 08:00 a 19:00 (660 min) por cada técnico que tuvo OTs ese día, en % |
 
 Las ediciones manuales (`id_propuesta` en `NULL` y `propuesta_modificada` en `false`) no cuentan para TAR.
 
 ### `GET /api/kpis`
 
-Los 8 KPI de una fecha.
+Los 10 KPI de una fecha.
 
 | Parámetro | Tipo | Descripción |
 | --- | --- | --- |
@@ -201,7 +203,7 @@ Los KPI de todas las fechas de un rango en una sola llamada. Los de asignación 
 Respuesta: `fecha_desde`, `fecha_hasta`, `por_tecnico`, `tecnico_id`, `kpis` y `errores`. `kpis` es una lista plana y cada elemento tiene la misma forma que en `GET /api/kpis` (`sigla`, `nombre`, `unidad`, `fecha`, `tecnico_id`, `numerador`, `denominador`, `valor`).
 
 - Sin `por_tecnico` ni `tecnico_id`: una fila por fecha y KPI sobre todos los técnicos (`tecnico_id` es `null`).
-- Con `por_tecnico=true`: esas filas globales y, además, una por fecha, técnico y KPI que se calcule por técnico (sin TPL ni OTP).
+- Con `por_tecnico=true`: esas filas globales y, además, una por fecha, técnico y KPI que se calcule por técnico (sin TPL ni OTP: CVH y UJO sí se calculan por técnico).
 - Con `tecnico_id`: solo las filas de ese técnico.
 - Si falla la BD, OTA, OTR, TAR y TPL quedan en `errores` y los demás KPI se devuelven igual.
 
@@ -209,7 +211,7 @@ Errores: 422 si una fecha es inválida, si `fecha_desde` es posterior a `fecha_h
 
 ### `GET /api/kpis/{sigla}`
 
-Un KPI de una fecha. `sigla` es una de OTA, OTR, OTX, OTP, TTR, TPS, TAR o TPL. Mismos parámetros que el anterior.
+Un KPI de una fecha. `sigla` es una de OTA, OTR, OTX, OTP, TTR, TPS, TAR, TPL, CVH o UJO. Mismos parámetros que el anterior.
 
 Errores: 422 si la sigla o la fecha son inválidas, o si se pide TPL u OTP por técnico; 404 si el técnico no existe; 503 si falla el cálculo (por ejemplo la BD).
 

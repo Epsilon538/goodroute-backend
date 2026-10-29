@@ -25,6 +25,14 @@ ZONA_CHILE = ZoneInfo("America/Santiago")
 HORA_PRIMERA_OT = 8
 HORA_ULTIMA_OT = 19
 
+# Duración de la jornada de cada técnico (todos tienen la misma), en minutos.
+JORNADA_MIN = (HORA_ULTIMA_OT - HORA_PRIMERA_OT) * 60
+
+# Ventana horaria de una OT: el servicio puede iniciarse hasta TOLERANCIA_ANTES_MIN antes y hasta
+# TOLERANCIA_DESPUES_MIN después de la hora programada (tolerancia vigente, asimétrica).
+TOLERANCIA_ANTES_MIN = 30
+TOLERANCIA_DESPUES_MIN = 15
+
 # Semilla con la que arranca la API. Con ella las OTs y el historial son siempre los mismos al reiniciar,
 # y coinciden con lo que ya se guardó en la BD. `/api/reset` sin semilla sortea una distinta.
 SEMILLA_INICIAL = 2026

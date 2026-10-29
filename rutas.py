@@ -223,7 +223,7 @@ def get_kpis(
     fecha: str = Query(description="Fecha programada de las OTs (YYYY-MM-DD)", examples=["2026-10-20"]),
     tecnico_id: Optional[str] = Query(default=None, description="Calcula solo sobre este técnico"),
 ):
-    """Devuelve OTA, OTR, OTX, OTP, TTR, TPS, TAR y TPL.
+    """Devuelve OTA, OTR, OTX, OTP, TTR, TPS, TAR, TPL, CVH y UJO.
 
     Cada KPI trae `numerador`, `denominador` y `valor`. Si falla el cálculo de alguno (por ejemplo, sin
     conexión a la BD), aparece en `errores` y los demás se devuelven igual. Con `tecnico_id`, TPL y OTP
@@ -295,7 +295,7 @@ def get_kpi(
     fecha: str = Query(description="Fecha programada de las OTs (YYYY-MM-DD)", examples=["2026-10-20"]),
     tecnico_id: Optional[str] = Query(default=None, description="Calcula solo sobre este técnico"),
 ):
-    """`sigla` es una de OTA, OTR, OTX, OTP, TTR, TPS, TAR o TPL. Devuelve `numerador`, `denominador` y `valor`."""
+    """`sigla` es una de OTA, OTR, OTX, OTP, TTR, TPS, TAR, TPL, CVH o UJO. Devuelve `numerador`, `denominador` y `valor`."""
     _validar_valor("KPI", sigla, list(kpis.CATALOGO))
     _validar_fecha(fecha)
     _validar_tecnico(tecnico_id)

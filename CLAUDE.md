@@ -47,7 +47,7 @@ GET `/api/v1/ordenes?estado=&fecha=`, GET `/api/v1/ordenes/{orden_id}` (detalle 
 y `comprobantes`), PATCH `/api/v1/ordenes/{orden_id}/asignar-tecnico`.
 
 Propios de GoodRoute: POST `/api/asignar-tecnicos` (lote de una corrida del optimizador),
-GET `/api/kpis?fecha=&tecnico_id=` (los 8 KPI), GET `/api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=` (rango, una sola llamada) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
+GET `/api/kpis?fecha=&tecnico_id=` (los 10 KPI), GET `/api/kpis/rango?fecha_desde=&fecha_hasta=&por_tecnico=&tecnico_id=` (rango, una sola llamada) y GET `/api/kpis/{sigla}?fecha=&tecnico_id=` (uno), GET
 `/api/asignaciones?fecha=` (historia de la tabla `asignacion`), POST
 `/api/asignaciones/cargar-historial` (la inserta en la BD, solo las filas que aún no están: se puede
 llamar varias veces sin duplicar), GET `/api/reset?semilla=` y GET `/`.
@@ -112,12 +112,12 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
 
 Definiciones del catálogo (documento *Estado de KPIs* del PO, HU-24). Todos reciben la fecha
 (`YYYY-MM-DD`). Se exponen por `GET /api/kpis` y `GET /api/kpis/{sigla}` (`kpis.calcular` normaliza el
-resultado en `numerador`, `denominador` y `valor`; TAR sale en %, los promedios en minutos); no escriben en
+resultado en `numerador`, `denominador` y `valor`; TAR, CVH y UJO salen en %, los promedios en minutos); no escriben en
 `kpi_valor`, eso lo hace otro servicio. Si la BD falla, esos endpoints responden 503 (uno) o listan el
 KPI en `errores` y devuelven los demás (todos).
-Los de conteo devuelven un entero; TAR, TPL, TPS y TTR devuelven `numerador` y `denominador`, para
+Los de conteo devuelven un entero; TAR, TPL, TPS, TTR, CVH y UJO devuelven `numerador` y `denominador`, para
 agregar entre fechas sumando las partes (en TPL, TPS y TTR el numerador son minutos). `tecnico_id` es
-opcional en todos salvo TPL y OTP.
+opcional en todos salvo TPL y OTP (CVH y UJO sí).
 
 - **De asignación (SQL sobre `asignacion`, por `fecha_orden_de_trabajo::date`):**
   - `calcular_ota`: filas sin `motivo_reprogramacion` y con técnico aceptado (asignaciones iniciales).
@@ -133,7 +133,15 @@ opcional en todos salvo TPL y OTP.
   - `calcular_tps`: documento de inicio a comprobante de cada OT que tiene ambos (también `parcial`).
   - `calcular_ttr`: comprobante de una OT a documento de inicio de la siguiente del mismo técnico en el
     día. Incluye la espera hasta la hora agendada (definición pendiente del PO).
-- **Pendiente:** OTA está por confirmar con la dispatcher. Las filas guardadas antes de este cambio de
+  - `calcular_cvh`: OTs cuyo `documentoInicio.fecha` cae entre `hora programada - TOLERANCIA_ANTES_MIN (30)` y
+    `hora programada + TOLERANCIA_DESPUES_MIN (15)` sobre las OTs con documento de inicio. Las OTs sin
+    documento (el técnico no llegó) no entran. Definición del PO (ingeniero de optimización): solo la hora
+    de inicio con ambas tolerancias y el documento de inicio.
+  - `calcular_ujo`: minutos efectivos (documento de inicio a comprobante, como TPS) sobre `JORNADA_MIN` (8:00 a
+    19:00 = 660 min, igual para todos) por cada técnico con al menos una OT ese día. Supuestos: técnicos sin
+    OTs no entran al denominador; la jornada 8 a 19 es la validada por la dispatcher (el PO dudó entre 19 y 21).
+    Con el volumen simulado (18 a 20 OTs por día) da cerca de 8 %.
+- **Pendiente:** confirmar con el PO el denominador de CVH y UJO (ver arriba). OTA está por confirmar con la dispatcher. Las filas guardadas antes de este cambio de
   TAR (PATCH con `id_propuesta` del técnico anterior y reprogramaciones con `true`) se cuentan mal;
   hay que limpiarlas o ignorarlas.
 

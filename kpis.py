@@ -4,7 +4,7 @@ De asignación (OTA, OTR, TAR, TPL): se calculan con SQL sobre `asignacion`. Una
 asignación o de reprogramación. Se filtra por el día de la OT (`fecha_orden_de_trabajo`) y no por
 cuándo se registró el evento.
 
-De ejecución (OTX, OTP, TPS, TTR): se calculan sobre las OTs, documentos de inicio y comprobantes
+De ejecución (OTX, OTP, TPS, TTR, CVH, UJO): se calculan sobre las OTs, documentos de inicio y comprobantes
 del sistema externo, que se reciben como `fuente` (ver `datos.FuenteDatos`). Se filtra por la
 fecha programada de la OT.
 
@@ -18,7 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import db
-from generadores import ZONA_CHILE
+from generadores import JORNADA_MIN, TOLERANCIA_ANTES_MIN, TOLERANCIA_DESPUES_MIN, ZONA_CHILE
 
 ESTADO_CIERRE = "finalizada"  # `parcial` no cuenta como cierre (clarificado por el cliente)
 
@@ -197,6 +197,48 @@ def calcular_ttr(fecha: str, fuente, tecnico_id: Optional[str] = None) -> dict:
     return _promedio(traslados)
 
 
+def calcular_cvh(fecha: str, fuente, tecnico_id: Optional[str] = None) -> dict:
+    """CVH: OTs que se iniciaron dentro de su ventana horaria sobre las OTs que se iniciaron (razón).
+
+    La ventana es la hora programada con ambas tolerancias (hasta TOLERANCIA_ANTES_MIN antes y
+    TOLERANCIA_DESPUES_MIN después) y lo que se compara es la fecha del documento de inicio. Las OTs sin
+    documento de inicio (el técnico nunca llegó) no entran ni en el numerador ni en el denominador.
+    """
+    cumplen = total = 0
+    for orden in _del_dia(fuente, fecha, tecnico_id):
+        documento = fuente.documento_inicio_de(orden["id"])
+        if not documento:
+            continue
+        programada = _momento(f"{orden['fechaProgramada']}T{orden['horaProgramada']}:00Z")
+        llegada = _momento(documento["fecha"])
+        total += 1
+        if programada - timedelta(minutes=TOLERANCIA_ANTES_MIN) <= llegada <= programada + timedelta(minutes=TOLERANCIA_DESPUES_MIN):
+            cumplen += 1
+    return {"numerador": cumplen, "denominador": total}
+
+
+def calcular_ujo(fecha: str, fuente, tecnico_id: Optional[str] = None) -> dict:
+    """UJO: tiempo efectivo de trabajo sobre la jornada configurada (razón).
+
+    El numerador son los minutos entre el documento de inicio y el comprobante de cada OT (como TPS).
+    El denominador es la jornada (`JORNADA_MIN`, igual para todos) por cada técnico que tuvo al menos una
+    OT ese día: un técnico sin OTs no entra. Para agregar varios días se suman numeradores y denominadores.
+    """
+    minutos_por_tecnico: dict[str, float] = {}
+    for orden in _del_dia(fuente, fecha, tecnico_id):
+        if not orden["tecnicoId"]:
+            continue
+        acumulado = minutos_por_tecnico.setdefault(orden["tecnicoId"], 0.0)
+        documento = fuente.documento_inicio_de(orden["id"])
+        cierre = _fecha_comprobante(fuente, orden["id"])
+        if documento and cierre:
+            minutos_por_tecnico[orden["tecnicoId"]] = acumulado + _minutos(_momento(documento["fecha"]), cierre)
+    return {
+        "numerador": round(sum(minutos_por_tecnico.values()), 2),
+        "denominador": len(minutos_por_tecnico) * JORNADA_MIN,
+    }
+
+
 # --- Catálogo: un punto de entrada para los endpoints ---
 
 # tipo: "conteo" (un entero), "promedio" (minutos sobre cantidad) o "razon" (se informa en %).
@@ -209,6 +251,8 @@ CATALOGO = {
     "TPS": {"nombre": "Tiempo Promedio de Servicio", "unidad": "min", "tipo": "promedio", "por_tecnico": True},
     "TAR": {"nombre": "Tasa de Aceptación de Rutas", "unidad": "%", "tipo": "razon", "por_tecnico": True},
     "TPL": {"nombre": "Tiempo de Planificación", "unidad": "min", "tipo": "promedio", "por_tecnico": False},
+    "CVH": {"nombre": "Cumplimiento de Ventana Horaria", "unidad": "%", "tipo": "razon", "por_tecnico": True},
+    "UJO": {"nombre": "Utilización de Jornada", "unidad": "%", "tipo": "razon", "por_tecnico": True},
 }
 
 
@@ -227,6 +271,10 @@ def _crudo(sigla: str, fecha: str, fuente, tecnico_id: Optional[str]):
         return calcular_tps(fecha, fuente, tecnico_id)
     if sigla == "TAR":
         return calcular_tar(fecha, tecnico_id)
+    if sigla == "CVH":
+        return calcular_cvh(fecha, fuente, tecnico_id)
+    if sigla == "UJO":
+        return calcular_ujo(fecha, fuente, tecnico_id)
     return calcular_tpl(fecha)
 
 

@@ -18,6 +18,8 @@ from generadores import (
     HORA_ULTIMA_OT,
     NAMESPACE,
     ORDENES_POR_REGION,
+    TOLERANCIA_ANTES_MIN,
+    TOLERANCIA_DESPUES_MIN,
     azar_de,
     fake,
     iso_utc,
@@ -45,8 +47,6 @@ VELOCIDAD_MEDIA_KMH = 35  # convierte el traslado en kilometraje estimado
 REDONDEO_HORA_MIN = 15  # la hora programada se redondea hacia arriba a este múltiplo
 
 # --- Llegada respecto de la hora programada (minutos) ---
-TOLERANCIA_ANTES_MIN = 30
-TOLERANCIA_DESPUES_MIN = 15
 PROBABILIDAD_ATRASO = 0.12  # llegadas fuera de la tolerancia
 ATRASO_EXTRA_MIN = (1, 30)  # cuánto se pasa de la tolerancia
 
