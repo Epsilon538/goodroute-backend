@@ -10,7 +10,7 @@ import precalculo
 from datos import fuente
 from generadores import ahora_utc
 from modelos import (
-    ESTADO_ASIGNACION_POR_CONFIRMAR,
+    ESTADO_ASIGNADA,
     ESTADO_POR_ASIGNAR,
     ESTADOS_ASIGNABLES,
     ESTADOS_OT,
@@ -84,7 +84,7 @@ def _asignar_en_memoria(orden: dict, tecnico_id: Optional[str]) -> None:
     if tecnico_id is None:
         orden["estado"] = ESTADO_POR_ASIGNAR
     elif orden["estado"] in ESTADOS_ASIGNABLES:
-        orden["estado"] = ESTADO_ASIGNACION_POR_CONFIRMAR
+        orden["estado"] = ESTADO_ASIGNADA
     orden["updatedAt"] = ahora_utc()
 
 

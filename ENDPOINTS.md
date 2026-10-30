@@ -62,7 +62,7 @@ Cada OT trae `id`, `padreId`, `tipo`, `estado`, `clienteId`, `contratoId`, `tecn
 
 `horaProgramada` va en UTC (formato `HH:MM`). Las OTs se programan entre 8:00 y 19:00 hora de Chile, convertidas con la zona `America/Santiago`.
 
-Estados: `porRevisar`, `porAsignar`, `enviadaPlanificacion`, `asignacionPorConfirmar`, `asignada`, `enTerreno`, `parcial`, `finalizada`, `enviadaCobranza`.
+Estados: `porRevisar`, `porAsignar`, `enviadaPlanificacion`, `asignada`, `enTerreno`, `parcial`, `finalizada`, `enviadaCobranza`.
 
 Tipos: `instalacionSimple`, `instalacionConCorte`, `mantencion`, `retiro`.
 
@@ -96,7 +96,7 @@ Motivos: `Cliente No Disponible`, `Falta de Coordinación`, `Técnico No Disponi
 
 Toda edición por este endpoint es manual, no una propuesta del optimizador: la fila se guarda con `id_propuesta` en `NULL` y `propuesta_modificada` en `false`, por lo que no cuenta para TAR.
 
-Asignar mueve la OT de `porRevisar`, `porAsignar` o `enviadaPlanificacion` a `asignacionPorConfirmar`.
+Asignar mueve la OT de `porRevisar`, `porAsignar` o `enviadaPlanificacion` directamente a `asignada` (el estado `asignacionPorConfirmar` ya no se usa). Enviar `tecnico_id` en `null` la devuelve a `porAsignar`.
 
 Respuesta: la OT actualizada más `guardado_en_bd` (y `db_error` si falló) y `kpis_actualizados` (y `kpis_error` si no se pudo actualizar `kpi_valor`). Un fallo de BD no tumba el request: el cambio en memoria ya se aplicó.
 

@@ -13,7 +13,6 @@ ESTADOS_OT = [
     "porRevisar",
     "porAsignar",
     "enviadaPlanificacion",
-    "asignacionPorConfirmar",
     "asignada",
     "enTerreno",
     "parcial",
@@ -22,8 +21,8 @@ ESTADOS_OT = [
 ]
 
 ESTADO_POR_ASIGNAR = "porAsignar"
-ESTADO_ASIGNACION_POR_CONFIRMAR = "asignacionPorConfirmar"
-# Estados desde los que una asignación deja la OT en asignacionPorConfirmar.
+ESTADO_ASIGNADA = "asignada"
+# Estados desde los que asignar un técnico deja la OT en asignada (ya no se usa asignacionPorConfirmar).
 ESTADOS_ASIGNABLES = ("porRevisar", "porAsignar", "enviadaPlanificacion")
 
 # Deben coincidir con el CHECK de asignacion.motivo_reprogramacion en la BD.

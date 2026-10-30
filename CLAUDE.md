@@ -75,7 +75,8 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
   `kilometraje_estimado numeric(8,2)`. Estrategia parcial: lo válido se aplica y los errores se reportan sin detener el resto.
   `tipo_modificacion` guarda por OT el tipo de las modificaciones que la afectan (ej. `ot_agregada`), no el JSON de la ruta.
 - Asignar un técnico mueve la OT de `porRevisar`, `porAsignar` o `enviadaPlanificacion` a
-  `asignacionPorConfirmar` (`modelos.ESTADOS_ASIGNABLES`) y actualiza `updatedAt`.
+  `asignada` (`modelos.ESTADOS_ASIGNABLES`) y actualiza `updatedAt`. `asignacionPorConfirmar` ya no se usa
+  (decisión del usuario): se sacó de `ESTADOS_OT`.
 - **`fechaProgramada` es texto libre en el sistema externo.** Al registrar una asignación se exige
   `YYYY-MM-DD` y `horaProgramada` `HH:MM`; si no, la OT se rechaza (422 en el PATCH, entrada en
   `errores` en el POST) y no se aplica ni se guarda nada.
@@ -85,8 +86,8 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
   zona `America/Santiago` (`generadores.programada_utc`), no con un desfase fijo: UTC-3 en verano y
   UTC-4 en invierno (`tzdata` está en `requirements.txt` por Windows).
 - **Modelo de datos del backoffice v3.0.** Técnicos y OTs usan sus nombres y valores en camelCase
-  (`tecnicoId`, `fechaProgramada`, `porAsignar`, `instalacionSimple`). Los 9 estados de OT están en
-  `modelos.ESTADOS_OT`; la API solo genera `porAsignar` y mueve a `asignacionPorConfirmar`
+  (`tecnicoId`, `fechaProgramada`, `porAsignar`, `instalacionSimple`). Los 8 estados de OT están en
+  `modelos.ESTADOS_OT`; la API solo genera `porAsignar` y mueve a `asignada`
   (`enviadaPlanificacion` y `parcial` existen en el enum pero nada los asigna todavía). Los request y
   response propios de GoodRoute (PATCH y POST de asignación, `guardado_en_bd`, `ot_id`) siguen en
   snake_case, igual que las columnas de `asignacion`. Fechas de OT y técnico en UTC con sufijo Z.
