@@ -9,7 +9,7 @@ Los endpoints que simulan el backoffice llevan el prefijo `/api/v1` y usan el mo
 | Método | Ruta | Qué hace |
 | --- | --- | --- |
 | GET | `/` | Estado del servicio y lista de endpoints |
-| GET | `/api/reset` | Regenera técnicos, clientes, OTs e historial |
+| GET | `/api/reset` | Regenera los datos y deja el registro de asignaciones en el estado de la semilla (solo entorno simulado) |
 | GET | `/api/v1/tecnicos` | Lista los técnicos |
 | GET | `/api/v1/ordenes` | Lista las OTs, con filtros opcionales |
 | GET | `/api/v1/ordenes/{orden_id}` | Detalle de una OT con documento de inicio y comprobantes |
@@ -29,15 +29,21 @@ Devuelve `mensaje`, `version`, `docs` y `endpoints_disponibles`.
 
 ### `GET /api/reset`
 
-Regenera en memoria técnicos, clientes, OTs e historial. Los técnicos y clientes salen siempre iguales (semilla 42). Las OTs y el historial dependen de la semilla: la API arranca con la 2026, así que son las mismas en cada reinicio y coinciden con lo guardado en la BD. Un reset sin semilla genera otras.
+Deja la API y el registro persistente en el estado de la semilla (HU-37):
+
+1. Regenera en memoria técnicos, clientes, OTs e historial. Los técnicos y clientes salen siempre iguales (semilla 42). Las OTs y el historial dependen de la semilla: con la misma semilla se repiten las mismas OTs para cada fecha. La API arranca con la 2026.
+2. Borra toda la tabla `asignacion`, incluidas las confirmaciones hechas desde el módulo web, carga el historial de la semilla y vacía `kpi_valor`, en una sola transacción.
+3. Recalcula en `kpi_valor` los KPI de los últimos 30 días.
+
+Solo funciona si la variable de entorno `ENTORNO` vale `simulado`. Si no está o tiene otro valor, responde 403 y no cambia nada (ni la memoria ni la BD), para que nunca borre el registro del entorno real (HU-46).
 
 | Parámetro | Tipo | Descripción |
 | --- | --- | --- |
 | `semilla` | entero, opcional | Semilla de las OTs y el historial. Sin ella se sortea una nueva. Con la misma semilla se repiten. `2026` vuelve a los datos del arranque |
 
-Respuesta: `mensaje`, `semilla`, `tecnicos`, `ordenes`, `asignaciones_historial`.
+Respuesta: `mensaje`, `semilla`, `tecnicos`, `ordenes`, `asignaciones_historial` y `registro`, con `asignaciones_borradas`, `historial_insertado`, `error`, `kpis_recalculados` y `kpis_error`. Si falla la BD, la memoria ya quedó regenerada y el error se informa en `registro.error`; repetir el reset lo corrige.
 
-Las filas que ya están en la BD no se tocan. Con una semilla distinta de 2026, un `id_orden_trabajo` guardado antes corresponde a otra OT.
+Al reiniciar, la API vuelve a la semilla 2026. Después de un reset con otra semilla, un reinicio deja la memoria en 2026 y la BD con el historial de la otra semilla, así que para las pruebas conviene usar siempre `semilla=2026`.
 
 ## Backoffice simulado (`/api/v1`)
 
@@ -60,7 +66,7 @@ Los filtros se pueden combinar. Un valor inválido responde 422.
 
 Cada OT trae `id`, `padreId`, `tipo`, `estado`, `clienteId`, `contratoId`, `tecnicoId`, `direccionFactura`, `direccionInstalacion`, `comuna`, `region`, `contactoNombre`, `contactoTelefono`, `contactoEmail`, `fechaProgramada`, `horaProgramada`, `problemaInicioReportado`, `motivoNoInicio`, `facturacion`, `ultimaSincronizacion`, `createdAt` y `updatedAt`.
 
-`horaProgramada` va en UTC (formato `HH:MM`). Las OTs se programan entre 8:00 y 19:00 hora de Chile, convertidas con la zona `America/Santiago`.
+`horaProgramada` va en UTC (formato `HH:MM`). Las OTs comienzan entre las 8:00 y las 19:00 hora de Chile, ambas incluidas, en pasos de 15 minutos, convertidas con la zona `America/Santiago`. La jornada limita la hora de inicio, no la de término: un servicio puede terminar después de las 19:00 (HU-36).
 
 Estados: `porRevisar`, `porAsignar`, `enviadaPlanificacion`, `asignada`, `enTerreno`, `parcial`, `finalizada`, `enviadaCobranza`.
 
@@ -173,14 +179,14 @@ Los KPI de ejecución (OTX, OTP, TTR, TPS, CVH y UJO) de hoy y de fechas futuras
 
 | Sigla | Nombre | Fuente | Qué calcula |
 | --- | --- | --- | --- |
-| OTA | OT Asignadas | `asignacion` | Filas con técnico aceptado y sin motivo de reprogramación |
-| OTR | OT Reprogramadas | `asignacion` | Filas con motivo de reprogramación |
+| OTA | OT Asignadas | `asignacion` | OTs distintas con técnico según su última confirmación (fila sin motivo de reprogramación). Una OT confirmada varias veces cuenta una vez, para el técnico de la última; si la última la descarta, no cuenta |
+| OTR | OT Reprogramadas | `asignacion` | Filas con motivo de reprogramación: cuenta cada reprogramación, aunque sea de la misma OT |
 | OTX | OT Realizadas con Éxito | OTs del sistema externo | OTs en estado `finalizada` (`parcial` no cuenta) |
 | OTP | OT Pendientes | OTs del sistema externo | OTs del día que al terminarlo, en hora de Chile, no estaban `finalizada` |
 | TTR | Tiempo de Traslado | OTs del sistema externo | Minutos entre el comprobante de una OT y el documento de inicio de la siguiente del mismo técnico |
 | TPS | Tiempo Promedio de Servicio | OTs del sistema externo | Minutos entre el documento de inicio y el comprobante de cada OT |
-| TAR | Tasa de Aceptación de Rutas | `asignacion` | Propuestas del optimizador sin modificar sobre propuestas del optimizador, en % |
-| TPL | Tiempo de Planificación | `asignacion` | Minutos entre `inicio_planificacion` y `fecha_asignacion` |
+| TAR | Tasa de Aceptación de Rutas | `asignacion` | OTs propuestas por el optimizador cuyo técnico final (última confirmación) es el propuesto, sobre las OTs propuestas o agregadas a mano a una corrida, en %. Cada OT cuenta una vez. Una reasignación manual que cambia al técnico propuesto la deja como modificada |
+| TPL | Tiempo de Planificación | `asignacion` | Minutos entre `inicio_planificacion` y `fecha_asignacion` de la última confirmación de cada OT que tenga ambas fechas |
 | CVH | Cumplimiento de Ventana Horaria | OTs del sistema externo | OTs cuyo documento de inicio cae dentro de su ventana (hora programada, hasta 30 min antes y hasta 15 min después) sobre las OTs que tienen documento de inicio, en % |
 | UJO | Utilización de Jornada | OTs del sistema externo | Minutos efectivos de trabajo (documento de inicio a comprobante) sobre la jornada de 08:00 a 19:00 (660 min) por cada técnico que tuvo OTs ese día, en % |
 
@@ -243,4 +249,5 @@ El numerador y el denominador permiten agregar varias fechas sumando las partes,
 - La BD es PostgreSQL (variable `DATABASE_URL`). Sin ella la API arranca, pero los endpoints que escriben o leen `asignacion` responden con error o con `guardado_en_bd: false`.
 - `kpi_valor` necesita que la tabla `kpi` tenga las 10 siglas (es una clave foránea) y que `valor` y `denominador` acepten `NULL`. Si falla la escritura, las lecturas calculan al vuelo y el error se informa en `kpis_error` o queda en el log.
 - La API nunca modifica el esquema de la BD. La tabla `asignacion` necesita las columnas `inicio_planificacion` (timestamp) y `kilometraje_estimado` (numeric(8,2)).
-- Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada arranque o reset. El arranque es siempre igual (semilla 2026). Los cambios de estado de las OTs hechos por PATCH o POST se pierden al reiniciar; las filas de `asignacion` quedan.
+- Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada arranque o reset. El arranque es siempre igual (semilla 2026). Al arrancar, la API vuelve a aplicar sobre las OTs de hoy en adelante las asignaciones guardadas en `asignacion`, así que después de un reinicio conservan su técnico y su estado (HU-37).
+- Variable `ENTORNO=simulado`: habilita `GET /api/reset`. Debe estar en los servicios de prueba y de ensayo, y nunca en el del entorno real.

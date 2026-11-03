@@ -22,7 +22,9 @@ from generadores import (
     SEMILLA_INICIAL,
     azar_de,
     fake,
+    ahora_utc,
     fijar_semillas,
+    minuto_al_azar,
     nombre_usuario,
     nueva_orden,
     numero_ot,
@@ -31,7 +33,7 @@ from generadores import (
     telefono_aleatorio,
 )
 from historial import generar_historial
-from modelos import TIPOS_OT
+from modelos import ESTADO_ASIGNADA, ESTADO_POR_ASIGNAR, ESTADOS_ASIGNABLES, TIPOS_OT
 
 DIAS_ORDENES = 5
 CANTIDAD_CLIENTES = 8
@@ -105,15 +107,30 @@ def _generar_ordenes(clientes: list[dict], semilla: int) -> list[dict]:
         indice = 0
         for region, cantidad in ORDENES_POR_REGION:
             for direccion in azar_dia.sample(DIRECCIONES[region], cantidad):
-                hora = azar_dia.randint(HORA_PRIMERA_OT, HORA_ULTIMA_OT)
+                minutos = minuto_al_azar(azar_dia, HORA_PRIMERA_OT * 60, HORA_ULTIMA_OT * 60)
                 tipo = azar_dia.choice(TIPOS_OT)
                 numero = numero_ot(fecha, indice)
                 azar = azar_de(semilla, "ot", numero)
                 ordenes.append(nueva_orden(
-                    numero, tipo, direccion, region, programada_utc(fecha, hora), azar.choice(clientes), azar,
+                    numero, tipo, direccion, region, programada_utc(fecha, minutos // 60, minutos % 60),
+                    azar.choice(clientes), azar,
                 ))
                 indice += 1
     return ordenes
+
+
+def asignar_en_memoria(orden: dict, tecnico_id: Optional[str]) -> None:
+    """Asigna (o descarta, con None) el técnico de una OT y ajusta su estado.
+
+    Con técnico, la OT pasa de `porRevisar`, `porAsignar` o `enviadaPlanificacion` a `asignada`; en otro
+    estado solo cambia el técnico. Sin técnico vuelve a `porAsignar`.
+    """
+    orden["tecnicoId"] = tecnico_id
+    if tecnico_id is None:
+        orden["estado"] = ESTADO_POR_ASIGNAR
+    elif orden["estado"] in ESTADOS_ASIGNABLES:
+        orden["estado"] = ESTADO_ASIGNADA
+    orden["updatedAt"] = ahora_utc()
 
 
 class FuenteDatos:
@@ -145,6 +162,20 @@ class FuenteDatos:
         self.documentos_inicio = historial.documentos_inicio
         self.comprobantes = historial.comprobantes
         self.asignaciones = historial.asignaciones
+
+    def aplicar_confirmaciones(self, filas: list[tuple[str, Optional[str]]]) -> int:
+        """Reaplica sobre las OTs en memoria las asignaciones guardadas en la BD (HU-37, opción A del PO).
+
+        `filas` son pares (id de OT, técnico aceptado) en el orden en que se registraron; la última de cada
+        OT es la que queda. Las OTs que no existen en memoria se ignoran. Devuelve cuántas OTs cambiaron.
+        """
+        cambiadas = set()
+        for orden_id, tecnico_id in filas:
+            orden = self.buscar_orden(orden_id)
+            if orden is not None:
+                asignar_en_memoria(orden, tecnico_id)
+                cambiadas.add(orden_id)
+        return len(cambiadas)
 
     def buscar_tecnico(self, tecnico_id: str) -> Optional[dict]:
         return next((t for t in self.tecnicos if t["id"] == tecnico_id), None)

@@ -29,6 +29,9 @@ pip install -r requirements.txt
 DATABASE_URL=postgresql://... uvicorn main:app --reload --port 8000
 ```
 
+Variables de entorno: `DATABASE_URL` (PostgreSQL) y `ENTORNO=simulado`, que habilita `GET /api/reset` (borra y
+recarga el registro de asignaciones; sin ella responde 403). No poner `ENTORNO=simulado` en el entorno real.
+
 Swagger en `/docs`. Sin `DATABASE_URL` la API funciona, pero los endpoints de asignación
 responden con `guardado_en_bd: false` / `base_de_datos.error`.
 
@@ -42,8 +45,9 @@ historial ya ejecutado, para calcular TPS, TTR, OTX y OTP, con su historia de la
 (OTA, OTR, TAR y TPL; `GET /api/asignaciones`).
 
 Los técnicos y clientes son siempre los mismos (semilla fija). Las OTs y el historial también son los mismos
-en cada arranque (semilla 2026, ids de OT por fecha), así que coinciden con lo guardado en la BD y no hay que
-recargar nada al reiniciar. `GET /api/reset` sin semilla genera otras; `?semilla=2026` vuelve a las del arranque. `GET /api/v1/ordenes/{id}` devuelve la OT
+en cada arranque (semilla 2026, ids de OT por fecha), y al arrancar se reaplican las asignaciones guardadas de hoy
+en adelante. `GET /api/reset?semilla=2026` deja también la BD en el estado de la semilla: borra las confirmaciones y
+recarga el historial. `GET /api/v1/ordenes/{id}` devuelve la OT
 con su `documentoInicio` y sus `comprobantes` (los nombres de esas dos propiedades están por
 confirmar con el equipo externo).
 

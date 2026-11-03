@@ -1,3 +1,4 @@
+import os
 import re
 from datetime import date
 from typing import Optional
@@ -7,12 +8,8 @@ from fastapi import APIRouter, HTTPException, Query
 import db
 import kpis
 import precalculo
-from datos import fuente
-from generadores import ahora_utc
+from datos import asignar_en_memoria, fuente
 from modelos import (
-    ESTADO_ASIGNADA,
-    ESTADO_POR_ASIGNAR,
-    ESTADOS_ASIGNABLES,
     ESTADOS_OT,
     MOTIVOS_REPROGRAMACION,
     TIPOS_MODIFICACION_PATCH,
@@ -26,6 +23,10 @@ router_v1 = APIRouter(prefix="/api/v1")  # simula el backoffice (modelo de datos
 FORMATO_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
 FORMATO_HORA = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 LARGO_MAX_TIPO_MODIFICACION = 100  # columna varchar(100)
+# El reset borra el registro de asignaciones, así que solo se permite si ENTORNO=simulado (HU-37). Sin esa
+# variable responde con error y no borra nada, para que nunca toque el registro real (HU-46).
+VARIABLE_ENTORNO = "ENTORNO"
+ENTORNO_SIMULADO = "simulado"
 
 
 # --- Helpers ---
@@ -77,15 +78,6 @@ def _fecha_hora_ot(orden: dict) -> str:
             "se esperaba YYYY-MM-DD y HH:MM."
         )
     return f"{fecha}T{hora}:00"
-
-
-def _asignar_en_memoria(orden: dict, tecnico_id: Optional[str]) -> None:
-    orden["tecnicoId"] = tecnico_id
-    if tecnico_id is None:
-        orden["estado"] = ESTADO_POR_ASIGNAR
-    elif orden["estado"] in ESTADOS_ASIGNABLES:
-        orden["estado"] = ESTADO_ASIGNADA
-    orden["updatedAt"] = ahora_utc()
 
 
 def _tipo_modificacion_de_ot(modificaciones: list[dict], ot_id: str) -> Optional[str]:
@@ -153,26 +145,48 @@ def root():
     }
 
 
-@router.get("/api/reset", tags=["Admin"], summary="Reiniciar y regenerar todos los datos")
+@router.get("/api/reset", tags=["Admin"], summary="Reiniciar los datos y el registro de asignaciones")
 def reset(
     semilla: Optional[int] = Query(
         default=None,
         description="Semilla de las OTs y el historial. Sin ella se sortea una nueva; la respuesta la informa. 2026 es la del arranque.",
     ),
 ):
-    """Regenera en memoria técnicos, clientes, OTs e historial.
+    """Deja la API y el registro persistente en el estado de la semilla (HU-37).
 
-    Los técnicos y clientes salen siempre iguales. Sin `semilla` las OTs son otras; con la misma `semilla` se
-    repiten. La API arranca con la semilla 2026: `semilla=2026` vuelve a los datos del arranque, que son los
-    que coinciden con lo cargado en la BD. Las filas ya guardadas en la BD no se tocan.
+    1. Regenera en memoria técnicos, clientes, OTs e historial. Técnicos y clientes salen siempre iguales; con
+       la misma `semilla` las OTs y el historial se repiten fecha por fecha. La API arranca con la semilla 2026.
+    2. Borra toda la tabla `asignacion` (también las confirmaciones hechas desde el módulo web), carga el
+       historial de la semilla y vacía `kpi_valor`, en una sola transacción.
+    3. Recalcula en `kpi_valor` los KPI de los últimos 30 días.
+
+    Solo funciona si la variable de entorno `ENTORNO` vale `simulado`; si no, responde 403 y no cambia nada.
     """
+    if os.environ.get(VARIABLE_ENTORNO) != ENTORNO_SIMULADO:
+        raise HTTPException(
+            403,
+            f"El reset solo está permitido en el entorno simulado ({VARIABLE_ENTORNO}={ENTORNO_SIMULADO}). "
+            "No se borró ni se regeneró nada.",
+        )
     fuente.reiniciar(semilla)
+    registro = {"asignaciones_borradas": 0, "historial_insertado": 0, "error": None,
+                "kpis_recalculados": False, "kpis_error": None}
+    try:
+        registro["asignaciones_borradas"], registro["historial_insertado"] = db.reiniciar_registro(fuente.asignaciones)
+    except Exception as e:
+        registro["error"] = str(e)
+    else:
+        registro["kpis_error"] = precalculo.precalcular_ventana(fuente)
+        registro["kpis_recalculados"] = registro["kpis_error"] is None
     return {
-        "mensaje": "Reset completado. Todos los datos han sido regenerados.",
+        "mensaje": "Reset completado. Los datos y el registro de asignaciones quedaron en el estado de la semilla."
+        if registro["error"] is None else
+        "Los datos en memoria se regeneraron, pero no se pudo reiniciar el registro en la BD.",
         "semilla": fuente.semilla,
         "tecnicos": len(fuente.tecnicos),
         "ordenes": len(fuente.ordenes),
         "asignaciones_historial": len(fuente.asignaciones),
+        "registro": registro,
     }
 
 
@@ -409,7 +423,7 @@ def asignar_tecnico(orden_id: str, body: AsignarTecnicoRequest):
     except ValueError as e:
         raise HTTPException(422, str(e))
 
-    _asignar_en_memoria(orden, body.tecnico_id)
+    asignar_en_memoria(orden, body.tecnico_id)
 
     error = _guardar([{
         "id_orden_trabajo": orden_id,
@@ -478,7 +492,7 @@ def asignar_tecnicos_masivo(body: AsignarTecnicosRequest):
                 continue
 
             propuesto = propuesta_por_ot.get(ot_id)
-            _asignar_en_memoria(orden, ruta.tecnico_id)
+            asignar_en_memoria(orden, ruta.tecnico_id)
             actualizadas.append({"ot_id": ot_id, "tecnico_id": ruta.tecnico_id, "estado": orden["estado"]})
             registros.append({
                 "id_orden_trabajo": ot_id,

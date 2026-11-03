@@ -103,9 +103,17 @@ marcó llegada) y `comprobantes`. Esos dos nombres están por confirmar con el e
   El id de una OT sale de su fecha (`generadores.numero_ot`), no del orden de generación, y cada fecha usa
   su propio azar: arrancar otro día no cambia las fechas en común. El día anómalo está fijo en el calendario
   (`historial._es_dia_anomalo`). `GET /api/reset` sin semilla sortea otra (`fuente.semilla`) y, con
-  `?semilla=N`, la fija; `?semilla=2026` vuelve a los datos del arranque. Con otra semilla, una fila ya
-  guardada en `asignacion` con un `OT-xxxx` apunta a otra OT. Mantener esta estabilidad al tocar los
-  generadores: no usar `random` global ni numeración secuencial entre días.
+  `?semilla=N`, la fija; `?semilla=2026` vuelve a los datos del arranque. El reset (HU-37) también borra
+  toda `asignacion`, carga el historial de la semilla y vacía y recalcula `kpi_valor` (`db.reiniciar_registro`),
+  y solo funciona con la variable `ENTORNO=simulado` (sin ella, 403 sin tocar nada; protege el registro real,
+  HU-46). Al arrancar, `main.recargar_confirmaciones` reaplica en memoria las filas de `asignacion` de hoy en
+  adelante (opción A del PO). Mantener esta estabilidad al tocar los generadores: no usar `random` global ni
+  numeración secuencial entre días.
+- **Jornada (HU-36):** las OTs *comienzan* entre 8:00 y 19:00 (ambas incluidas), en pasos de 15 min
+  (`generadores.minuto_al_azar`, `PASO_HORA_MIN`); el servicio puede terminar después. En el historial, si la
+  cadena de un técnico no cabe (su última visita empezaría después de las 19:00), `historial._acomodar_en_jornada`
+  pasa sus últimas visitas a otro técnico de la región sin cambiar el total del día. Los parámetros del
+  generador llevan su origen en un comentario y en el documento de parámetros de HU-11.
 - Hay 13 técnicos, 8 clientes internos (sin endpoint, solo alimentan `clienteId` y los datos de
   contacto de cada OT), 90 OTs de hoy en adelante (18 por día durante 5 días) y el historial de 30
   días (OT-0091 en adelante, con volumen distinto según el día de la semana).
@@ -135,12 +143,17 @@ agregar entre fechas sumando las partes (en TPL, TPS y TTR el numerador son minu
 opcional en todos salvo TPL y OTP (CVH y UJO sí).
 
 - **De asignación (SQL sobre `asignacion`, por `fecha_orden_de_trabajo::date`):**
-  - `calcular_ota`: filas sin `motivo_reprogramacion` y con técnico aceptado (asignaciones iniciales).
-  - `calcular_otr`: filas con `motivo_reprogramacion`. OTA y OTR son excluyentes por fila.
-  - `calcular_tar`: propuestas del optimizador que la dispatcher no modificó (`id_propuesta` no nulo y
-    `propuesta_modificada = false`) sobre las propuestas del optimizador (filas con `id_propuesta` o
-    con `propuesta_modificada = true`). Las ediciones manuales (`id_propuesta` null y flag false) no cuentan.
-  - `calcular_tpl`: minutos entre `inicio_planificacion` y `fecha_asignacion` (promedio), confirmado con el PO.
+  - Todos salen de `SQL_ASIGNACION_POR_DIA_Y_TECNICO` (HU-37). Una confirmación es una fila sin
+    `motivo_reprogramacion`; la última de cada OT (mayor `fecha_asignacion`, luego mayor `id`) decide su técnico.
+  - `calcular_ota`: OTs distintas cuya última confirmación tiene técnico (una confirmación repetida o una
+    reasignación manual sin motivo no suma; un descarte la saca).
+  - `calcular_otr`: filas con `motivo_reprogramacion`: cada reprogramación cuenta, aunque sea de la misma OT.
+  - `calcular_tar`: por OT con técnico. Denominador: OTs con alguna fila con `id_propuesta` o con
+    `propuesta_modificada = true` (agregada a mano a una corrida). Numerador: las de ese grupo cuyo técnico final
+    es la última propuesta del optimizador. Una reasignación manual que cambia al técnico propuesto la deja
+    modificada (respuesta del PO); las OTs solo editadas a mano, sin corrida, no cuentan.
+  - `calcular_tpl`: minutos entre `inicio_planificacion` y `fecha_asignacion` de la última confirmación de cada
+    OT que tenga ambas fechas (promedio por OT), confirmado con el PO.
 - **De ejecución (`calcular_x(fecha, fuente)`, por `fechaProgramada`):**
   - `calcular_otx`: OTs `finalizada` (`parcial` no cuenta).
   - `calcular_otp`: complemento de OTX: OTs del día que al terminar el día en hora de Chile no estaban
@@ -190,8 +203,10 @@ equipo) en el documento de parámetros.
 - `finalizada` y `parcial` tienen 1 documento de inicio y 1 comprobante; `parcial` cubre solo parte de
   los dispositivos. Los dispositivos solo existen como patentes dentro del comprobante.
 - `lat` y `lng` del check-in se sortean alrededor del centro de la región, no de la dirección de la OT.
-- El historial se regenera en memoria al arrancar y en cada reset, y no toca la BD. La historia de
-  `asignacion` se inserta solo con `POST /api/asignaciones/cargar-historial`, que omite las filas ya
-  guardadas. Lo que se pierde al reiniciar son los cambios de estado de las OTs en memoria (PATCH y POST);
-  las filas de `asignacion` quedan.
+- El historial se regenera en memoria al arrancar y en cada reset. En la BD se carga con el reset (que
+  primero vacía `asignacion`) o con `POST /api/asignaciones/cargar-historial`, que omite las filas ya
+  guardadas. Al reiniciar, las asignaciones de hoy en adelante se reaplican desde la BD.
+- **Pendiente (pregunta del PO):** cuando un día con confirmaciones web pasa a la ventana del historial, su
+  `OT-xxxx` coincide con una OT del historial de la semilla que es otra visita. Hay una regla propuesta al PO,
+  sin implementar.
 - El frontend filtra `?estado=porAsignar`, así que no ve el historial.

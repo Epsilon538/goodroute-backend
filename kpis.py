@@ -2,7 +2,8 @@
 
 De asignación (OTA, OTR, TAR, TPL): se calculan con SQL sobre `asignacion`. Una fila es un evento de
 asignación o de reprogramación. Se filtra por el día de la OT (`fecha_orden_de_trabajo`) y no por
-cuándo se registró el evento.
+cuándo se registró el evento. OTA, TAR y TPL cuentan cada OT una vez, con su última confirmación (HU-37);
+OTR cuenta cada reprogramación.
 
 De ejecución (OTX, OTP, TPS, TTR, CVH, UJO): se calculan sobre las OTs, documentos de inicio y comprobantes
 del sistema externo, que se reciben como `fuente` (ver `datos.FuenteDatos`). Se filtra por la
@@ -23,92 +24,50 @@ from generadores import JORNADA_MIN, TOLERANCIA_ANTES_MIN, TOLERANCIA_DESPUES_MI
 ESTADO_CIERRE = "finalizada"  # `parcial` no cuenta como cierre (clarificado por el cliente)
 
 
-def _consultar(query: str, *params) -> tuple:
-    with db.conexion() as conn, conn.cursor() as cur:
-        cur.execute(query, params)
-        return cur.fetchone()
-
-
-def _filtro_tecnico(tecnico_id: Optional[str]) -> tuple[str, tuple]:
-    """Cláusula SQL y parámetros para filtrar por el técnico asignado."""
-    return ("AND id_aceptada = %s", (tecnico_id,)) if tecnico_id else ("", ())
-
-
 # --- KPIs de asignación (SQL sobre `asignacion`) ---
 
+def _de_asignacion(fecha: str, tecnico_id: Optional[str]) -> dict:
+    """Grupo de los KPI de asignación de un día, para todos los técnicos o para uno."""
+    grupos = [g for (dia, tecnico), g in _asignacion_por_dia_y_tecnico(fecha, fecha).items()
+              if tecnico_id is None or tecnico == tecnico_id]
+    return {clave: sum(g[clave] for g in grupos) for clave in ("ota", "otr", "tar_num", "tar_den", "tpl_min", "tpl_n")}
+
+
 def calcular_ota(fecha: str, tecnico_id: Optional[str] = None) -> int:
-    """OTA: asignaciones iniciales, es decir filas con técnico aceptado y sin motivo de reprogramación."""
-    filtro, params = _filtro_tecnico(tecnico_id)
-    (total,) = _consultar(
-        f"""
-        SELECT COUNT(*)
-        FROM asignacion
-        WHERE motivo_reprogramacion IS NULL
-          AND id_aceptada IS NOT NULL
-          AND fecha_orden_de_trabajo::date = %s
-          {filtro}
-        """,
-        fecha, *params,
-    )
-    return total
+    """OTA: OTs distintas con un técnico asignado según su última confirmación (HU-37).
+
+    Una confirmación es una fila sin motivo de reprogramación (corrida confirmada o reasignación manual).
+    Si una OT se confirma varias veces cuenta una sola vez, para el técnico de la última. Si la última la
+    descarta (sin técnico), no cuenta.
+    """
+    return _de_asignacion(fecha, tecnico_id)["ota"]
 
 
 def calcular_otr(fecha: str, tecnico_id: Optional[str] = None) -> int:
-    """OTR: reprogramaciones, es decir filas con motivo de reprogramación."""
-    filtro, params = _filtro_tecnico(tecnico_id)
-    (total,) = _consultar(
-        f"""
-        SELECT COUNT(*)
-        FROM asignacion
-        WHERE motivo_reprogramacion IS NOT NULL
-          AND fecha_orden_de_trabajo::date = %s
-          {filtro}
-        """,
-        fecha, *params,
-    )
-    return total
+    """OTR: reprogramaciones, es decir filas con motivo de reprogramación. Cuenta cada una, aunque una misma
+    OT se reprograme varias veces (HU-37, respuesta del PO)."""
+    return _de_asignacion(fecha, tecnico_id)["otr"]
 
 
 def calcular_tar(fecha: str, tecnico_id: Optional[str] = None) -> dict:
-    """TAR: propuestas del optimizador que la dispatcher no modificó sobre las propuestas del optimizador (razón).
+    """TAR: OTs propuestas por el optimizador cuyo técnico final es el propuesto, sobre las OTs propuestas (razón).
 
-    Las ediciones manuales (PATCH) se guardan con `id_propuesta` null y `propuesta_modificada` false,
-    y no cuentan. Sí cuentan las filas con propuesta, y las OTs que la dispatcher agregó a mano
-    antes de confirmar la corrida (sin propuesta, con `propuesta_modificada` true).
+    Se mira cada OT una vez (HU-37): el técnico final es el de su última confirmación y la propuesta es la última
+    del optimizador. Entran al denominador las OTs con propuesta y las que la dispatcher agregó a mano a una
+    corrida (`propuesta_modificada` true). Una reasignación manual que cambia al técnico propuesto la deja como
+    modificada. Las OTs sin propuesta del optimizador ni corrida (solo ediciones manuales) no cuentan.
     """
-    filtro, params = _filtro_tecnico(tecnico_id)
-    numerador, denominador = _consultar(
-        f"""
-        SELECT
-            COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL AND propuesta_modificada = false),
-            COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL OR propuesta_modificada = true)
-        FROM asignacion
-        WHERE fecha_orden_de_trabajo::date = %s
-          {filtro}
-        """,
-        fecha, *params,
-    )
-    return {"numerador": numerador, "denominador": denominador}
+    grupo = _de_asignacion(fecha, tecnico_id)
+    return {"numerador": grupo["tar_num"], "denominador": grupo["tar_den"]}
 
 
 def calcular_tpl(fecha: str) -> dict:
-    """TPL: minutos entre el inicio de la planificación y la asignación (promedio).
+    """TPL: minutos entre el inicio de la planificación y la asignación (promedio por OT).
 
-    Solo cuentan las filas con ambas fechas, que son las de la confirmación de una corrida.
+    Cada OT cuenta una vez, con su última confirmación que tenga ambas fechas (HU-37).
     """
-    minutos, cantidad = _consultar(
-        """
-        SELECT
-            COALESCE(SUM(EXTRACT(EPOCH FROM fecha_asignacion - inicio_planificacion)) / 60, 0),
-            COUNT(*)
-        FROM asignacion
-        WHERE inicio_planificacion IS NOT NULL
-          AND fecha_asignacion IS NOT NULL
-          AND fecha_orden_de_trabajo::date = %s
-        """,
-        fecha,
-    )
-    return {"numerador": round(float(minutos), 2), "denominador": cantidad}
+    grupo = _de_asignacion(fecha, None)
+    return {"numerador": round(grupo["tpl_min"], 2), "denominador": grupo["tpl_n"]}
 
 
 # --- KPIs de ejecución (sobre los datos del sistema externo) ---
@@ -320,36 +279,66 @@ def _normalizar(sigla: str, fecha: str, tecnico_id: Optional[str], crudo) -> dic
 SIGLAS_ASIGNACION = ["OTA", "OTR", "TAR", "TPL"]
 
 
-def _asignacion_por_dia_y_tecnico(desde: str, hasta: str) -> dict:
-    """Agrega `asignacion` por día de la OT y técnico aceptado, con una sola consulta.
+# Una fila por OT y día (OTA, TAR, TPL) más una por reprogramación (OTR), agrupadas por técnico. La última
+# confirmación de una OT es la de `fecha_asignacion` más reciente (y, a igual fecha, la de mayor id).
+SQL_ASIGNACION_POR_DIA_Y_TECNICO = """
+    WITH confirmaciones AS (
+        SELECT
+            fecha_orden_de_trabajo::date AS dia, id_orden_trabajo, id_aceptada, id_propuesta, propuesta_modificada,
+            EXTRACT(EPOCH FROM fecha_asignacion - inicio_planificacion) / 60 AS minutos_plan,
+            ROW_NUMBER() OVER (
+                PARTITION BY fecha_orden_de_trabajo::date, id_orden_trabajo
+                ORDER BY fecha_asignacion DESC NULLS LAST, id DESC
+            ) AS orden
+        FROM asignacion
+        WHERE motivo_reprogramacion IS NULL
+          AND fecha_orden_de_trabajo::date BETWEEN %(desde)s AND %(hasta)s
+    ),
+    por_ot AS (
+        SELECT
+            dia, id_orden_trabajo,
+            (ARRAY_AGG(id_aceptada ORDER BY orden))[1] AS tecnico,
+            (ARRAY_AGG(id_propuesta ORDER BY orden) FILTER (WHERE id_propuesta IS NOT NULL))[1] AS propuesta,
+            BOOL_OR(id_propuesta IS NOT NULL OR propuesta_modificada) AS en_tar,
+            (ARRAY_AGG(minutos_plan ORDER BY orden) FILTER (WHERE minutos_plan IS NOT NULL))[1] AS minutos_plan
+        FROM confirmaciones
+        GROUP BY dia, id_orden_trabajo
+    ),
+    eventos AS (
+        SELECT
+            dia, tecnico, 1 AS ota, 0 AS otr,
+            CASE WHEN en_tar AND tecnico = propuesta THEN 1 ELSE 0 END AS tar_num,
+            CASE WHEN en_tar THEN 1 ELSE 0 END AS tar_den,
+            minutos_plan
+        FROM por_ot
+        WHERE tecnico IS NOT NULL
+        UNION ALL
+        SELECT fecha_orden_de_trabajo::date, id_aceptada, 0, 1, 0, 0, NULL
+        FROM asignacion
+        WHERE motivo_reprogramacion IS NOT NULL
+          AND fecha_orden_de_trabajo::date BETWEEN %(desde)s AND %(hasta)s
+    )
+    SELECT dia, tecnico, SUM(ota), SUM(otr), SUM(tar_num), SUM(tar_den),
+           COALESCE(SUM(minutos_plan), 0), COUNT(minutos_plan)
+    FROM eventos
+    GROUP BY dia, tecnico
+"""
 
-    Devuelve {(fecha, id_aceptada): {ota, otr, tar_num, tar_den, tpl_min, tpl_n}}. `id_aceptada` puede ser
-    None (filas sin técnico). El global de un día es la suma de todos sus grupos, igual que sin filtro.
+
+def _asignacion_por_dia_y_tecnico(desde: str, hasta: str) -> dict:
+    """Agrega `asignacion` por día de la OT y técnico, con una sola consulta.
+
+    Devuelve {(fecha, tecnico): {ota, otr, tar_num, tar_den, tpl_min, tpl_n}}. En OTA, TAR y TPL cada OT cuenta
+    una vez, para el técnico de su última confirmación; en OTR cuenta cada reprogramación, para su técnico
+    (que puede ser None). El global de un día es la suma de todos sus grupos.
     """
     with db.conexion() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT
-                fecha_orden_de_trabajo::date AS dia,
-                id_aceptada,
-                COUNT(*) FILTER (WHERE motivo_reprogramacion IS NULL AND id_aceptada IS NOT NULL),
-                COUNT(*) FILTER (WHERE motivo_reprogramacion IS NOT NULL),
-                COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL AND propuesta_modificada = false),
-                COUNT(*) FILTER (WHERE id_propuesta IS NOT NULL OR propuesta_modificada = true),
-                COALESCE(SUM(EXTRACT(EPOCH FROM fecha_asignacion - inicio_planificacion) / 60)
-                    FILTER (WHERE inicio_planificacion IS NOT NULL AND fecha_asignacion IS NOT NULL), 0),
-                COUNT(*) FILTER (WHERE inicio_planificacion IS NOT NULL AND fecha_asignacion IS NOT NULL)
-            FROM asignacion
-            WHERE fecha_orden_de_trabajo::date BETWEEN %s AND %s
-            GROUP BY 1, 2
-            """,
-            (desde, hasta),
-        )
+        cur.execute(SQL_ASIGNACION_POR_DIA_Y_TECNICO, {"desde": desde, "hasta": hasta})
         filas = cur.fetchall()
     return {
         (str(dia), tecnico): {
-            "ota": ota, "otr": otr, "tar_num": tar_num, "tar_den": tar_den,
-            "tpl_min": float(tpl_min), "tpl_n": tpl_n,
+            "ota": int(ota), "otr": int(otr), "tar_num": int(tar_num), "tar_den": int(tar_den),
+            "tpl_min": float(tpl_min), "tpl_n": int(tpl_n),
         }
         for dia, tecnico, ota, otr, tar_num, tar_den, tpl_min, tpl_n in filas
     }

@@ -18,10 +18,12 @@ from generadores import (
     HORA_ULTIMA_OT,
     NAMESPACE,
     ORDENES_POR_REGION,
+    PASO_HORA_MIN,
     TOLERANCIA_ANTES_MIN,
     TOLERANCIA_DESPUES_MIN,
     azar_de,
     fake,
+    minuto_al_azar,
     iso_utc,
     nueva_orden,
     numero_ot,
@@ -32,7 +34,8 @@ from modelos import MOTIVOS_REPROGRAMACION, TIPOS_OT
 
 DIAS_HISTORIAL = 30
 
-# Total de OTs por día de la semana (lunes = 0). Se reparte entre regiones en la proporción de ORDENES_POR_REGION.
+# Volumen del historial (HU-36): total de OTs por día de la semana (lunes = 0), 18,1 en promedio en días
+# laborales. Se reparte entre regiones en la proporción de ORDENES_POR_REGION. Origen: supuesto del equipo.
 OTS_POR_DIA_SEMANA = [20, 18, 18, 18, 16, 8, 3]
 
 # --- Duración de las visitas (minutos) ---
@@ -44,7 +47,7 @@ EXTRA_VISITA_LARGA_MIN = (15, 40)
 # --- Traslados y hora programada ---
 TRASLADO_MIN = (20, 75)  # desde la base (primera visita) o desde la visita anterior
 VELOCIDAD_MEDIA_KMH = 35  # convierte el traslado en kilometraje estimado
-REDONDEO_HORA_MIN = 15  # la hora programada se redondea hacia arriba a este múltiplo
+REDONDEO_HORA_MIN = PASO_HORA_MIN  # la hora programada se redondea hacia arriba a este múltiplo
 
 # --- Llegada respecto de la hora programada (minutos) ---
 PROBABILIDAD_ATRASO = 0.12  # llegadas fuera de la tolerancia
@@ -165,10 +168,14 @@ def _generar_dia(fecha, anomalo, por_region, clientes, semilla, resultado: Histo
                 "duracion": _duracion(tipo, azar), "traslado": azar.randint(*TRASLADO_MIN),
             })
 
-    # 2. Hora programada: cada técnico encadena sus visitas (cierre + traslado, redondeado)
+    # 2. Hora programada: cada técnico encadena sus visitas (cierre + traslado, redondeado). Si la cadena de
+    #    un técnico no cabe en la jornada, sus últimas visitas pasan a otro técnico de la región (HU-36).
     por_tecnico: dict[str, list[dict]] = {}
     for visita in visitas:
         por_tecnico.setdefault(visita["final"]["id"], []).append(visita)
+    for cadena in por_tecnico.values():
+        azar.shuffle(cadena)
+    _acomodar_en_jornada(por_tecnico, por_region)
     for cadena in por_tecnico.values():
         _programar(cadena, fecha, azar)
 
@@ -200,17 +207,55 @@ def _duracion(tipo: str, azar) -> int:
     return minutos
 
 
-def _programar(cadena: list[dict], fecha: date, azar) -> None:
-    """Fija `programada` en cada visita: la primera al azar, las demás desde la anterior."""
-    azar.shuffle(cadena)
+def _desplazamientos(cadena: list[dict]) -> list[int]:
+    """Minutos desde el inicio de la primera visita hasta el inicio de cada una, en el orden de la cadena."""
     desplazamientos = [0]
     for anterior, actual in zip(cadena, cadena[1:]):
         libre = desplazamientos[-1] + anterior["duracion"] + actual["traslado"]
         desplazamientos.append(math.ceil(libre / REDONDEO_HORA_MIN) * REDONDEO_HORA_MIN)
+    return desplazamientos
 
-    primera, ultima = HORA_PRIMERA_OT * 60, HORA_ULTIMA_OT * 60
-    maxima = max(primera, ultima - desplazamientos[-1])
-    inicio = REDONDEO_HORA_MIN * azar.randint(primera // REDONDEO_HORA_MIN, maxima // REDONDEO_HORA_MIN)
+
+def _cabe(cadena: list[dict]) -> bool:
+    """Una cadena cabe si, empezando a las 8:00, su última visita comienza a más tardar a las 19:00 (HU-36)."""
+    return _desplazamientos(cadena)[-1] <= (HORA_ULTIMA_OT - HORA_PRIMERA_OT) * 60
+
+
+def _acomodar_en_jornada(por_tecnico: dict[str, list[dict]], por_region: dict[str, list[dict]]) -> None:
+    """Pasa las últimas visitas de las cadenas que no caben al técnico de la misma región con menos carga
+    en el que sí caben. El total de OTs del día no cambia (HU-36, respuesta del PO).
+
+    La visita cambia de técnico final. Si no había sido reprogramada, cambian también el aceptado y, con
+    él, `modificada` (el nuevo técnico puede o no ser el propuesto).
+    """
+    pendientes = [tid for tid, cadena in por_tecnico.items() if not _cabe(cadena)]
+    while pendientes:
+        cadena = por_tecnico[pendientes.pop(0)]
+        while not _cabe(cadena):
+            visita = cadena.pop()
+            excluidos = {visita["final"]["id"]} | ({visita["aceptado"]["id"]} if visita["reprogramada"] else set())
+            candidatos = sorted(
+                (t for t in por_region[visita["region"]] if t["id"] not in excluidos
+                 and _cabe(por_tecnico.get(t["id"], []) + [visita])),
+                key=lambda t: _desplazamientos(por_tecnico.get(t["id"], []) + [visita])[-1],
+            )
+            if not candidatos:
+                raise RuntimeError(f"Las OTs de {visita['region']} no caben en la jornada de sus técnicos.")
+            nuevo = candidatos[0]
+            visita["final"] = nuevo
+            if not visita["reprogramada"]:
+                visita["aceptado"] = nuevo
+                visita["modificada"] = nuevo is not visita["propuesto"]
+            por_tecnico.setdefault(nuevo["id"], []).append(visita)
+
+
+def _programar(cadena: list[dict], fecha: date, azar) -> None:
+    """Fija `programada` en cada visita: la primera al azar, las demás desde la anterior.
+
+    La cadena ya viene ordenada y cabe en la jornada, así que ninguna visita comienza después de las 19:00.
+    """
+    desplazamientos = _desplazamientos(cadena)
+    inicio = minuto_al_azar(azar, HORA_PRIMERA_OT * 60, HORA_ULTIMA_OT * 60 - desplazamientos[-1])
     for visita, desplazamiento in zip(cadena, desplazamientos):
         minutos = inicio + desplazamiento
         visita["programada"] = programada_utc(fecha, minutos // 60, minutos % 60)

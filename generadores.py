@@ -22,8 +22,12 @@ NAMESPACE = uuid.UUID("6f1c2b8e-3d4a-4e5f-9a7b-1c2d3e4f5a6b")
 # La API entrega las horas en UTC; la jornada se define en hora de Chile y se convierte con la
 # zona horaria, porque el desfase cambia entre horario de verano (UTC-3) y de invierno (UTC-4).
 ZONA_CHILE = ZoneInfo("America/Santiago")
+# Jornada (HU-36): las OTs pueden *comenzar* entre las 8:00 y las 19:00, ambas incluidas. El servicio puede
+# terminar después del cierre. Origen: jornada validada por la dispatcher (Feedback_Backend, punto 4).
 HORA_PRIMERA_OT = 8
 HORA_ULTIMA_OT = 19
+# Las horas acordadas se sortean de cuarto en cuarto de hora (HU-36). Origen: supuesto del equipo, aprobado por el PO.
+PASO_HORA_MIN = 15
 
 # Duración de la jornada de cada técnico (todos tienen la misma), en minutos.
 JORNADA_MIN = (HORA_ULTIMA_OT - HORA_PRIMERA_OT) * 60
@@ -41,7 +45,7 @@ SEMILLA_INICIAL = 2026
 FECHA_BASE_IDS = date(2026, 1, 1)
 OTS_MAX_POR_DIA = 40
 
-# (región, OTs por día)
+# Volumen de las OTs futuras (HU-36): (región, OTs por día), 18 en total. Origen: supuesto del equipo.
 ORDENES_POR_REGION = [
     ("Valparaíso", 8),
     ("Metropolitana de Santiago", 5),
@@ -70,6 +74,11 @@ def numero_ot(fecha: date, indice_del_dia: int) -> int:
 def azar_de(semilla: int, *partes) -> random.Random:
     """Generador propio por entidad, para no alterar la secuencia global de `random`."""
     return random.Random("-".join(str(p) for p in (semilla, *partes)))
+
+
+def minuto_al_azar(azar: random.Random, desde_min: int, hasta_min: int) -> int:
+    """Minuto del día al azar entre `desde_min` y `hasta_min` (incluidos), en múltiplos de PASO_HORA_MIN."""
+    return PASO_HORA_MIN * azar.randint(-(-desde_min // PASO_HORA_MIN), hasta_min // PASO_HORA_MIN)
 
 
 def programada_utc(fecha: date, hora: int, minuto: int = 0) -> datetime:

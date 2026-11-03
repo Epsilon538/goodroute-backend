@@ -1,4 +1,5 @@
-"""Acceso a PostgreSQL (Render). La tabla `asignacion` es un log de eventos: solo se inserta.
+"""Acceso a PostgreSQL (Render). La tabla `asignacion` es un log de eventos: la API solo inserta, salvo el reset
+del entorno simulado, que la vacía y vuelve a cargar el historial de la semilla (HU-37).
 
 La API nunca modifica el esquema: los cambios a la tabla se ejecutan a mano en la BD.
 """
@@ -56,6 +57,36 @@ def insertar_asignaciones(registros: list[dict]) -> None:
     ]
     with conexion() as conn, conn.cursor() as cur:
         cur.executemany(SQL_INSERTAR_ASIGNACION, completos)
+
+
+def reiniciar_registro(historial: list[dict]) -> tuple[int, int]:
+    """Deja `asignacion` con solo el historial de la semilla y vacía `kpi_valor`, en una sola transacción (HU-37).
+
+    Borra también las confirmaciones hechas desde el módulo web. Solo cambia datos, no el esquema.
+    Devuelve (filas borradas de `asignacion`, filas del historial insertadas).
+    """
+    completos = [
+        {"inicio_planificacion": None, "kilometraje_estimado": None, **registro} for registro in historial
+    ]
+    with conexion() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM asignacion")
+        borradas = cur.rowcount
+        cur.executemany(SQL_INSERTAR_ASIGNACION, completos)
+        cur.execute("DELETE FROM kpi_valor")
+    return borradas, len(completos)
+
+
+def leer_confirmaciones(desde: str) -> list[tuple]:
+    """(id de OT, técnico aceptado) de las filas de `asignacion` cuya OT es de `desde` en adelante, en el orden
+    en que se registraron. Sirve para reaplicarlas en memoria al arrancar (HU-37)."""
+    with conexion() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id_orden_trabajo, id_aceptada FROM asignacion "
+            "WHERE fecha_orden_de_trabajo::date >= %s::date "
+            "ORDER BY fecha_asignacion NULLS FIRST, id",
+            (desde,),
+        )
+        return cur.fetchall()
 
 
 # Igual que SQL_INSERTAR_ASIGNACION, pero omite la fila si ya existe una igual (misma OT, técnicos, motivo y
