@@ -280,7 +280,8 @@ SIGLAS_ASIGNACION = ["OTA", "OTR", "TAR", "TPL"]
 
 
 # Una fila por OT y día (OTA, TAR, TPL) más una por reprogramación (OTR), agrupadas por técnico. La última
-# confirmación de una OT es la de `fecha_asignacion` más reciente (y, a igual fecha, la de mayor id).
+# confirmación de una OT es la insertada al final (mayor `id`): `asignacion` es un log que solo se agrega, y el
+# orden de llegada no depende de los relojes del frontend ni del servidor de la BD.
 SQL_ASIGNACION_POR_DIA_Y_TECNICO = """
     WITH confirmaciones AS (
         SELECT
@@ -288,7 +289,7 @@ SQL_ASIGNACION_POR_DIA_Y_TECNICO = """
             EXTRACT(EPOCH FROM fecha_asignacion - inicio_planificacion) / 60 AS minutos_plan,
             ROW_NUMBER() OVER (
                 PARTITION BY fecha_orden_de_trabajo::date, id_orden_trabajo
-                ORDER BY fecha_asignacion DESC NULLS LAST, id DESC
+                ORDER BY id DESC
             ) AS orden
         FROM asignacion
         WHERE motivo_reprogramacion IS NULL

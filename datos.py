@@ -32,6 +32,7 @@ from generadores import (
     rut_aleatorio,
     telefono_aleatorio,
 )
+import escenario
 from historial import generar_historial
 from modelos import ESTADO_ASIGNADA, ESTADO_POR_ASIGNAR, ESTADOS_ASIGNABLES, TIPOS_OT
 
@@ -162,6 +163,9 @@ class FuenteDatos:
         self.documentos_inicio = historial.documentos_inicio
         self.comprobantes = historial.comprobantes
         self.asignaciones = historial.asignaciones
+        # Escenario de la prueba con usuarios (escenario_prueba.json): técnicos, OTs del día planificado y
+        # ajustes del historial. Se aplica en cada arranque y reset, solo con su semilla y antes de su fecha.
+        self.escenario = escenario.aplicar(self)
 
     def aplicar_confirmaciones(self, filas: list[tuple[str, Optional[str]]]) -> int:
         """Reaplica sobre las OTs en memoria las asignaciones guardadas en la BD (HU-37, opción A del PO).

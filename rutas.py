@@ -129,6 +129,8 @@ def root():
         "mensaje": "GoodRoute Backend",
         "version": "1.0.0",
         "docs": "/docs",
+        "semilla": fuente.semilla,
+        "escenario": fuente.escenario,
         "endpoints_disponibles": [
             "GET  /api/v1/tecnicos",
             "GET  /api/v1/ordenes?estado=&fecha=",
@@ -186,6 +188,7 @@ def reset(
         "tecnicos": len(fuente.tecnicos),
         "ordenes": len(fuente.ordenes),
         "asignaciones_historial": len(fuente.asignaciones),
+        "escenario": fuente.escenario,
         "registro": registro,
     }
 
