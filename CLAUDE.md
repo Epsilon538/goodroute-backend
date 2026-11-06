@@ -144,7 +144,7 @@ opcional en todos salvo TPL y OTP (CVH y UJO sí).
 
 - **De asignación (SQL sobre `asignacion`, por `fecha_orden_de_trabajo::date`):**
   - Todos salen de `SQL_ASIGNACION_POR_DIA_Y_TECNICO` (HU-37). Una confirmación es una fila sin
-    `motivo_reprogramacion`; la última de cada OT (mayor `fecha_asignacion`, luego mayor `id`) decide su técnico.
+    `motivo_reprogramacion`; la última de cada OT (la de mayor `id`, es decir, la insertada al final) decide su técnico.
   - `calcular_ota`: OTs distintas cuya última confirmación tiene técnico (una confirmación repetida o una
     reasignación manual sin motivo no suma; un descarte la saca).
   - `calcular_otr`: filas con `motivo_reprogramacion`: cada reprogramación cuenta, aunque sea de la misma OT.
@@ -206,6 +206,12 @@ equipo) en el documento de parámetros.
 - El historial se regenera en memoria al arrancar y en cada reset. En la BD se carga con el reset (que
   primero vacía `asignacion`) o con `POST /api/asignaciones/cargar-historial`, que omite las filas ya
   guardadas. Al reiniciar, las asignaciones de hoy en adelante se reaplican desde la BD.
+- **Escenario de prueba (`escenario.py`, `escenario_prueba.json`):** documento "Datos de la prueba 6-nov". Se aplica al
+  final de `FuenteDatos.reiniciar` (arranque y reset) solo con su semilla (2026) y si su fecha no pasó. Ajusta
+  `activo`/`disponibilidad` de técnicos, reemplaza las OTs del día planificado (lunes 9-nov) y agrega reprogramaciones
+  con el mismo técnico al historial (S2). Valida contra los datos y lanza ValueError si algo no calza. Sus OTs pueden
+  salir de la regla de jornada a propósito (una a las 07:30, para HORA_FUERA_DE_JORNADA) y una tiene una calle
+  inventada (SIN_GEORREFERENCIA). Para quitarlo, borrar el JSON.
 - **Pendiente (pregunta del PO):** cuando un día con confirmaciones web pasa a la ventana del historial, su
   `OT-xxxx` coincide con una OT del historial de la semilla que es otra visita. Hay una regla propuesta al PO,
   sin implementar.

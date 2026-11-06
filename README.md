@@ -16,6 +16,7 @@ del modelo de datos del backoffice v3.0, a la espera de conectar el sistema exte
 | `datos.py` | Técnicos, clientes y OTs simulados en memoria (`fuente`) |
 | `historial.py` | Historial de 30 días: OTs ejecutadas con documento de inicio, comprobantes y asignaciones |
 | `generadores.py` | Constantes y utilidades compartidas por los generadores |
+| `escenario.py` y `escenario_prueba.json` | Escenario fabricado a mano para la prueba con usuarios (técnicos, OTs del día planificado y ajustes del historial) |
 | `db.py` | Conexión a Postgres e inserción en `asignacion` |
 | `precalculo.py` | Guarda y lee los KPI precalculados en `kpi_valor` (al arrancar, al asignar y al consultar) |
 | `kpis.py` | Cálculo de OTA, OTR, TAR y TPL (SQL sobre `asignacion`) y de TPS, TTR, OTX y OTP (sobre los datos de ejecución) |

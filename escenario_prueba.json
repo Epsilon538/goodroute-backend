@@ -1,0 +1,38 @@
+{
+  "descripcion": "Escenario de la prueba con usuarios del 6 de noviembre de 2026 (documento 'Datos de la prueba 6-nov'). La dispatcher planifica el lunes 9 con 5 técnicos: deja fuera a Andrés Espinoza Quezada y a la OT de Quilpué (tarea D1).",
+  "semilla": 2026,
+  "fecha": "2026-11-09",
+  "tecnicos": [
+    {"id": "d3de21d6-0650-5e2b-aeb6-fa1643d8d324", "nombre": "Catalina Mansilla Concha", "activo": false, "nota": "inactiva"},
+    {"id": "a0c9335d-0d00-5844-9b25-1473749a3a44", "nombre": "María Espinoza Yáñez", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"},
+    {"id": "d8230af5-056b-5198-933f-1d6c083dc95e", "nombre": "José Fuentes Calderón", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"},
+    {"id": "07281855-c49b-5c22-a7d2-f445220c10cc", "nombre": "Freddy González Plaza", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"},
+    {"id": "04550400-6725-58cf-be51-6c5478e18640", "nombre": "Lina Núñez Soto", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"},
+    {"id": "8034d3ce-4c76-53c6-94bd-2bbede081ede", "nombre": "Soledad Barraza Alvarado", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"},
+    {"id": "4ebf668a-e642-5487-98a0-c00fa3fb52b0", "nombre": "Amelia Hidalgo Osses", "disponibilidad": [false, true, true, true, true, true, true], "nota": "no disponible los lunes"}
+  ],
+  "ordenes": [
+    {"hora": "10:00", "tipo": "instalacionSimple", "region": "Valparaíso", "comuna": "Valparaíso", "direccion": "Condell 1490", "caso": "misma_hora", "esperado": "Rafael González Vásquez (primera visita) o MISMA_HORA_SIN_TECNICO"},
+    {"hora": "11:30", "tipo": "mantencion", "region": "Valparaíso", "comuna": "Valparaíso", "direccion": "Avenida Pedro Montt 1730", "caso": "asignable", "esperado": "Rafael González Vásquez"},
+    {"hora": "13:00", "tipo": "retiro", "region": "Valparaíso", "comuna": "Valparaíso", "direccion": "Pedro Montt 2855", "caso": "asignable", "esperado": "Rafael González Vásquez"},
+    {"hora": "14:30", "tipo": "instalacionSimple", "region": "Valparaíso", "comuna": "Valparaíso", "direccion": "Pasaje Mirador del Cóndor Azul 1185", "caso": "sin_georreferencia", "esperado": "SIN_GEORREFERENCIA (calle inventada)"},
+    {"hora": "10:00", "tipo": "instalacionConCorte", "region": "Valparaíso", "comuna": "Viña del Mar", "direccion": "Arlegui 615", "caso": "misma_hora", "esperado": "Noelia Pérez Romero (primera visita) o MISMA_HORA_SIN_TECNICO"},
+    {"hora": "11:30", "tipo": "mantencion", "region": "Valparaíso", "comuna": "Viña del Mar", "direccion": "Avenida Libertad 1348", "caso": "asignable", "esperado": "Noelia Pérez Romero"},
+    {"hora": "13:00", "tipo": "instalacionSimple", "region": "Valparaíso", "comuna": "Viña del Mar", "direccion": "Avenida Álvarez 1532", "caso": "asignable", "esperado": "Noelia Pérez Romero"},
+    {"hora": "10:00", "tipo": "retiro", "region": "Valparaíso", "comuna": "Viña del Mar", "direccion": "Errázuriz 563", "caso": "misma_hora", "esperado": "MISMA_HORA_SIN_TECNICO (sexta OT de las 10:00, o la asigna y queda pendiente otra de las seis)"},
+    {"hora": "15:00", "tipo": "mantencion", "region": "Valparaíso", "comuna": "Quilpué", "direccion": "Augusto Carozzi 841", "caso": "d1", "esperado": "La dispatcher la deja fuera (coordinada por otra vía)"},
+    {"hora": "10:00", "tipo": "instalacionSimple", "region": "Metropolitana de Santiago", "comuna": "Santiago", "direccion": "Agustinas 794", "caso": "misma_hora", "esperado": "Alfredo Jara Sepúlveda (primera visita) o MISMA_HORA_SIN_TECNICO"},
+    {"hora": "11:30", "tipo": "mantencion", "region": "Metropolitana de Santiago", "comuna": "Santiago", "direccion": "José Miguel de la Barra 650", "caso": "asignable", "esperado": "Alfredo Jara Sepúlveda"},
+    {"hora": "13:00", "tipo": "retiro", "region": "Metropolitana de Santiago", "comuna": "Santiago", "direccion": "San Pablo 967", "caso": "asignable", "esperado": "Alfredo Jara Sepúlveda"},
+    {"hora": "10:00", "tipo": "mantencion", "region": "Metropolitana de Santiago", "comuna": "Estación Central", "direccion": "Avenida Libertador Bernardo O'Higgins 3750", "caso": "misma_hora", "esperado": "Juan Bastías Cerda (primera visita) o MISMA_HORA_SIN_TECNICO"},
+    {"hora": "11:30", "tipo": "instalacionConCorte", "region": "Metropolitana de Santiago", "comuna": "Estación Central", "direccion": "Avenida Libertador Bernardo O'Higgins 3349", "caso": "asignable", "esperado": "Juan Bastías Cerda"},
+    {"hora": "13:00", "tipo": "instalacionSimple", "region": "Metropolitana de Santiago", "comuna": "Estación Central", "direccion": "Avenida Libertador Bernardo O'Higgins 3363", "caso": "asignable", "esperado": "Juan Bastías Cerda"},
+    {"hora": "10:00", "tipo": "instalacionSimple", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Plaza de Los Héroes 445", "caso": "misma_hora", "esperado": "Katherinne Vera Paredes (primera visita) o MISMA_HORA_SIN_TECNICO"},
+    {"hora": "11:30", "tipo": "mantencion", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Avenida Libertador Bernardo O'Higgins 201", "caso": "asignable", "esperado": "Katherinne Vera Paredes"},
+    {"hora": "07:30", "tipo": "retiro", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Avenida Bornand 30", "caso": "fuera_de_jornada", "esperado": "HORA_FUERA_DE_JORNADA"}
+  ],
+  "reprogramaciones_historial": [
+    {"ot": "OT-12006", "motivo": "Cliente Solicitó Cambio", "minutos_despues_confirmacion": 120, "nota": "S2: Noelia Pérez Romero pasa de 4 a 5 reprogramaciones (23/10 al 05/11)"},
+    {"ot": "OT-12242", "motivo": "Cliente No Disponible", "minutos_despues_confirmacion": 120, "nota": "S2: Noelia Pérez Romero pasa de 5 a 6; el segundo tiene 4"}
+  ]
+}

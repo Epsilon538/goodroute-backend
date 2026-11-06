@@ -41,7 +41,7 @@ Solo funciona si la variable de entorno `ENTORNO` vale `simulado`. Si no está o
 | --- | --- | --- |
 | `semilla` | entero, opcional | Semilla de las OTs y el historial. Sin ella se sortea una nueva. Con la misma semilla se repiten. `2026` vuelve a los datos del arranque |
 
-Respuesta: `mensaje`, `semilla`, `tecnicos`, `ordenes`, `asignaciones_historial` y `registro`, con `asignaciones_borradas`, `historial_insertado`, `error`, `kpis_recalculados` y `kpis_error`. Si falla la BD, la memoria ya quedó regenerada y el error se informa en `registro.error`; repetir el reset lo corrige.
+Respuesta: `mensaje`, `semilla`, `tecnicos`, `ordenes`, `asignaciones_historial`, `escenario` (resumen del escenario de prueba aplicado, o por qué no se aplicó) y `registro`, con `asignaciones_borradas`, `historial_insertado`, `error`, `kpis_recalculados` y `kpis_error`. Si falla la BD, la memoria ya quedó regenerada y el error se informa en `registro.error`; repetir el reset lo corrige.
 
 Al reiniciar, la API vuelve a la semilla 2026. Después de un reset con otra semilla, un reinicio deja la memoria en 2026 y la BD con el historial de la otra semilla, así que para las pruebas conviene usar siempre `semilla=2026`.
 
@@ -250,4 +250,5 @@ El numerador y el denominador permiten agregar varias fechas sumando las partes,
 - `kpi_valor` necesita que la tabla `kpi` tenga las 10 siglas (es una clave foránea) y que `valor` y `denominador` acepten `NULL`. Si falla la escritura, las lecturas calculan al vuelo y el error se informa en `kpis_error` o queda en el log.
 - La API nunca modifica el esquema de la BD. La tabla `asignacion` necesita las columnas `inicio_planificacion` (timestamp) y `kilometraje_estimado` (numeric(8,2)).
 - Los datos de técnicos, clientes y OTs viven en memoria y se regeneran en cada arranque o reset. El arranque es siempre igual (semilla 2026). Al arrancar, la API vuelve a aplicar sobre las OTs de hoy en adelante las asignaciones guardadas en `asignacion`, así que después de un reinicio conservan su técnico y su estado (HU-37).
+- Escenario de prueba (`escenario_prueba.json`, módulo `escenario.py`): se aplica en cada arranque y en cada reset, solo con la semilla 2026 y mientras su fecha no haya pasado. Ajusta la disponibilidad y el estado de algunos técnicos, reemplaza las OTs del día planificado por OTs escritas a mano (ids de `numero_ot` para esa fecha) y agrega reprogramaciones al historial. `GET /` y el reset informan si se aplicó.
 - Variable `ENTORNO=simulado`: habilita `GET /api/reset`. Debe estar en los servicios de prueba y de ensayo, y nunca en el del entorno real.

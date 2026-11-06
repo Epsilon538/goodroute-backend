@@ -83,7 +83,7 @@ def leer_confirmaciones(desde: str) -> list[tuple]:
         cur.execute(
             "SELECT id_orden_trabajo, id_aceptada FROM asignacion "
             "WHERE fecha_orden_de_trabajo::date >= %s::date "
-            "ORDER BY fecha_asignacion NULLS FIRST, id",
+            "ORDER BY id",
             (desde,),
         )
         return cur.fetchall()
