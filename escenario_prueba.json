@@ -29,7 +29,7 @@
     {"hora": "13:00", "tipo": "instalacionSimple", "region": "Metropolitana de Santiago", "comuna": "Estación Central", "direccion": "Avenida Libertador Bernardo O'Higgins 3363", "caso": "asignable", "esperado": "Juan Bastías Cerda"},
     {"hora": "10:00", "tipo": "instalacionSimple", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Plaza de Los Héroes 445", "caso": "misma_hora", "esperado": "Katherinne Vera Paredes (primera visita) o MISMA_HORA_SIN_TECNICO"},
     {"hora": "11:30", "tipo": "mantencion", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Avenida Libertador Bernardo O'Higgins 201", "caso": "asignable", "esperado": "Katherinne Vera Paredes"},
-    {"hora": "07:30", "tipo": "retiro", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Avenida Bornand 30", "caso": "fuera_de_jornada", "esperado": "HORA_FUERA_DE_JORNADA"}
+    {"hora": "07:30", "tipo": "retiro", "region": "Libertador General Bernardo O'Higgins", "comuna": "Rancagua", "direccion": "Avenida Libertador Bernardo O'Higgins 611", "caso": "fuera_de_jornada", "esperado": "HORA_FUERA_DE_JORNADA"}
   ],
   "reprogramaciones_historial": [
     {"ot": "OT-12006", "motivo": "Cliente Solicitó Cambio", "minutos_despues_confirmacion": 120, "nota": "S2: Noelia Pérez Romero pasa de 4 a 5 reprogramaciones (23/10 al 05/11)"},
